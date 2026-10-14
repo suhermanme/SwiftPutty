@@ -50,6 +50,12 @@ jobs:
           set -o pipefail
           scripts/test-all.sh --clean --stage core 2>&1 | tee -a test-all.log
 
+      - name: Swift build (package and tests)
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --stage swift-build 2>&1 | tee -a test-all.log
+
       - name: Swift tests
         timeout-minutes: 15
         run: |
@@ -80,10 +86,11 @@ jobs:
           # GitHub shows at most 10 annotations per step, so send two:
           # the failure lines, and the end of the log (both readable
           # through the API without downloading the log).
+          # (macOS ships bash 3.2, so encode with awk, not ${//}.)
           annotate() {  # title, text
-            local text="${2//'%'/'%25'}"
-            text="${text//$'\r'/}"
-            text="${text//$'\n'/'%0A'}"
+            local text
+            text=$(printf '%s\n' "$2" | tr -d '\r' \
+                   | awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); print }')
             echo "::error title=$1::${text}"
           }
           failures=$(grep -E "CHECK failed|expected .* got|✘|error:|Test +#.*(\*\*\*|Not Run)|ERROR:|SUMMARY:|WARNING: ThreadSanitizer|Assertion|[1-9][0-9]* leaks for" test-all.log \

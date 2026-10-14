@@ -11,6 +11,7 @@
 #               tests (host arch): plain, under `leaks --atExit`, with
 #               AddressSanitizer + UndefinedBehaviorSanitizer, and with
 #               ThreadSanitizer
+#   swift-build Swift package and tests, built only (part of `swift`)
 #   swift       Swift package tests
 #   swift-asan  Swift package tests with AddressSanitizer
 #   swift-tsan  Swift package tests with ThreadSanitizer
@@ -40,6 +41,10 @@ for stage in "${STAGES[@]}"; do
       core)
         echo "==== C core + bridge tests"
         scripts/build-core.sh --test --asan --tsan
+        ;;
+      swift-build)
+        echo "==== Swift package build"
+        swift build --build-tests
         ;;
       swift)
         echo "==== Swift package tests"
