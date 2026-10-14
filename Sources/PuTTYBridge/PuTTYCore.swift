@@ -105,7 +105,8 @@ public enum PuTTYCore {
     /// or deinitialised with teardown still queued).
     public static var liveSessionCount: Int { Int(spb_debug_live_sessions()) }
 
-    /// Diagnostics: sockets and listeners PuTTY is currently watching.
+    /// Diagnostics: sockets and listeners PuTTY is watching once all
+    /// queued work has run (waits for the core thread).
     public static var watchedDescriptorCount: Int { Int(spb_debug_uxsel_fds()) }
 
     /// Diagnostics: completed core loop iterations.

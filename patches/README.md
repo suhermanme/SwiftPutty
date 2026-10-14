@@ -17,3 +17,4 @@ Each patch:
 | `0001-arm-arch-queries-sysctl-fallthrough.patch` | `test_sysctl_flag()` returned an indeterminate value when `sysctlbyname()` failed on macOS | Not yet reported; suitable for upstream |
 | `0002-pollwrap-hup-wakes-writers.patch` | A refused non-blocking `connect()` (`POLLHUP` only on macOS) was never dispatched, so the poll loop spun forever | Not yet reported; suitable for upstream |
 | `0003-network-free-connect-error-message.patch` | The error text of each failed asynchronous `connect()` leaked | Not yet reported; suitable for upstream |
+| `0004-terminal-free-last-selected-text.patch` | `term_free()` leaked the last selected text kept for local paste | Not yet reported; suitable for upstream |

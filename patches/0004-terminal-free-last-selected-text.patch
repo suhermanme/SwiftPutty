@@ -1,0 +1,25 @@
+SwiftPutty local patch 0004
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstreaming
+
+terminal.c: free the last-selected-text buffers in term_free().
+
+When a selection is copied to CLIP_LOCAL, clipme() hands its text,
+attribute and colour buffers to the Terminal (last_selected_text,
+last_selected_attr, last_selected_tc), freeing the previous ones. Nothing
+freed the final set: term_free() did not. Upstream frontends free a
+Terminal only as their process exits, so it went unnoticed; SwiftPutty
+frees one per closed session. Found by `leaks --atExit`.
+
+--- a/terminal/terminal.c
++++ b/terminal/terminal.c
+@@ -2131,6 +2131,9 @@
+         printer_finish_job(term->print_job);
+     bufchain_clear(&term->printer_buf);
+     sfree(term->paste_buffer);
++    sfree(term->last_selected_text);
++    sfree(term->last_selected_attr);
++    sfree(term->last_selected_tc);
+     sfree(term->ltemp);
+     sfree(term->wcFrom);
+     sfree(term->wcTo);

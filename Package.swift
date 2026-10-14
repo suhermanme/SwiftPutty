@@ -14,6 +14,7 @@ let package = Package(
     products: [
         .library(name: "PuTTYBridge", targets: ["PuTTYBridge"]),
         .library(name: "SessionLayer", targets: ["SessionLayer"]),
+        .library(name: "TerminalUI", targets: ["TerminalUI"]),
     ],
     targets: [
         .binaryTarget(
@@ -30,6 +31,11 @@ let package = Package(
             dependencies: ["PuTTYBridge"],
             path: "Sources/SessionLayer"
         ),
+        .target(
+            name: "TerminalUI",
+            dependencies: ["PuTTYBridge", "SessionLayer"],
+            path: "Sources/TerminalUI"
+        ),
         // Test-only support code (local servers); not a product.
         .target(
             name: "TestServers",
@@ -39,7 +45,7 @@ let package = Package(
         // and runs serially under a single root suite.
         .testTarget(
             name: "SwiftPuttyKitTests",
-            dependencies: ["PuTTYBridge", "SessionLayer", "TestServers"],
+            dependencies: ["PuTTYBridge", "SessionLayer", "TerminalUI", "TestServers"],
             path: "Tests/SwiftPuttyKitTests"
         ),
     ],

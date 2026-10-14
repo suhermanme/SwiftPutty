@@ -5,7 +5,7 @@
 | **M00** | Upstream analysis and architecture | **COMPLETE** (2026-10-14) |
 | **M01** | Build skeleton and PuTTY core integration | **COMPLETE** (2026-10-14) |
 | **M02** | Session executor and event loop | **COMPLETE** (2026-10-14) |
-| M03 | Terminal rendering foundation | NOT STARTED |
+| **M03** | Terminal rendering foundation | **COMPLETE** (2026-10-14) |
 | M04 | Basic SSH session | NOT STARTED |
 | M05 | Saved sessions and PuTTY config UI | NOT STARTED |
 | M06 | Terminal parity | NOT STARTED |
@@ -20,6 +20,113 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M03 — Terminal rendering foundation
+
+**Delivered**
+
+- **Terminal on the core thread** (`Core/src/spb_terminal.c`): every
+  session owns a PuTTY `Terminal` (with `init_ucs` as GTK PuTTY sets it up
+  for a Unicode font) and, while connected, an `Ldisc`. Seat output goes
+  to `term_data`, whose backlog throttles the backend. The Seat gains the
+  terminal-backed methods (tty modes, cursor position, trust status,
+  control-character stripping, pixel size).
+- **TermWin → frames** (D-021): draw calls are recorded into a cell grid
+  with colours resolved as GTK PuTTY resolves them. Cursor overlays,
+  wide and combining characters, DEC double-width/height lines and the
+  trust sigil are cell flags. One `terminal_updated` notification per
+  frame; `spb_session_read_frame` copies the dirty rows. Scrollbar,
+  palette, title, icon title, bell, clipboard write, paste request and
+  resize request are forwarded.
+- **Input** (`Core/src/spb_input.c`, D-023): keys translated as GTK
+  PuTTY's `key_event` with PuTTY's formatters (cursor/keypad application
+  modes, function key types, Backspace, Return, Shift-PageUp scrollback,
+  Shift-Insert paste, Meta); typed and input-method UTF-8 text with
+  inline composition (`term_set_preedit_text`); bracketed paste; mouse
+  with Windows PuTTY's button mapping (select/extend/paste, double/triple
+  click, rectangular with Option); wheel to the application in mouse
+  reporting mode or to the scrollback; scroll, resize, focus, Copy All.
+- **Clipboards** (D-022): GTK's `setup_clipboards`; app-private selection
+  buffer plus the general pasteboard.
+- **Bridge API v3** (`PuTTYBridge.h`): `spb_cell`, `spb_frame_info`,
+  `spb_session_read_frame`, the input functions, terminal callbacks,
+  `spb_session_set_preedit`.
+- **Upstream patch** `0004-terminal-free-last-selected-text.patch` (found by
+  `leaks`): `term_free` leaked the local selection buffers. Planned
+  patches renumbered again: status hook `0005`, H-1 fix `0006`, H-2 fix
+  `0007`.
+- **Swift**: `PuTTYSession` terminal events and input methods;
+  `TerminalScreen` (frame buffers); `SessionController` forwards terminal
+  events to a `SessionTerminalDelegate` and tracks the titles.
+- **TerminalUI** (new module): `TerminalView` (AppKit, layer-backed,
+  `NSTextInputClient`, scrollbar, mouse, focus, bell incl. visual bell,
+  Edit > Copy/Paste, Copy All), `TerminalRenderer` (Core Text: batched
+  glyphs in the primary font, Core Text lines for fallback/combining
+  text, decorations, cursor overlays, double-size lines),
+  `TerminalKeyMapper`, `TerminalFont` (PuTTY `FontName`, whole-point
+  cells), `TerminalSessionView` (SwiftUI).
+- **App**: launcher form for Raw connections (interim, until the
+  configuration dialog in M05); one window per session with PuTTY's title
+  behaviour ("host - SwiftPutty", terminal title, "(inactive)"), Close
+  window on exit, fatal-error alert, default 80×24 size; Edit > Copy All
+  to Clipboard. Debug builds accept `SWIFTPUTTY_DEBUG_OPEN_RAW=host:port`
+  to open a session at launch (used for screenshots).
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4):
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| `spb_bridge_test`, `spb_session_test`, `spb_link_closure_test` | Passed |
+| `spb_terminal_test` (frames, colours, Unicode, line drawing, double-size lines, cursor, title/bell, resize, scrollback, exact key/paste/mouse bytes, selection and clipboards, mouse reporting, 20,000-line burst) | Passed; the burst renders in about 0.17 s with 7 frame notifications |
+| `leaks --atExit`: all three C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan (Debug) | Passed, no reports |
+| C tests under TSan (Debug, `halt_on_error=1`) | Passed, no reports |
+| `swift test` (43 tests, 11 suites; includes a pixel-level rendering check through a real `TerminalView`) | 43/43 passed; repeated runs stable |
+| `swift test --sanitize=address` | 43/43 passed |
+| `swift test --sanitize=thread` | 43/43 passed, no reports |
+| App Debug build | Succeeded, 0 warnings |
+| App Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
+| Manual run of the Debug app against a local Raw server (demo screen + shell on a PTY), screenshot-checked | 16/256/true colours, bold as colour, attributes, Cyrillic, CJK, emoji, combining, double-width/height lines, window title from OSC, window opens at 80×24, terminal fills the window |
+
+**Problems found and fixed during M03**
+
+- Paint-time re-entrancy: PuTTY calls `set_scrollbar` and other TermWin
+  methods inside a paint, while the screen lock is held. These now record
+  their change under the held lock (no recursive locking).
+- Upstream frontends must register their selection clipboards with each
+  Terminal (`setup_clipboards`); without it, selection copied nothing.
+- Focus changes need an explicit `term_update` (as GTK's focus handler).
+- Core Text: `CTFontDrawGlyphs` uses the context's text matrix and text
+  position, which `CTLineDraw` advances; glyphs came out mirrored or
+  displaced until both were set explicitly per path. Caught by the
+  pixel-level rendering test.
+- Upstream leak in `term_free` (patch `0004`).
+- The terminal answers control sequences in binary test payloads (e.g.
+  ENQ, DA), so transfer tests now use printable data.
+- Test races: the loop-iteration and descriptor diagnostics were sampled
+  at the wrong moment under sanitizer timing. `spb_debug_uxsel_fds` now
+  counts on the core thread; the iteration test uses two barriers.
+- App: the terminal is resized when the session appears after layout;
+  the terminal view takes keyboard focus when its window opens.
+
+**Limitations / not done**
+
+- Only Raw connections, from an interim launcher form; SSH is M04, the
+  configuration dialog M05.
+- Not visually verified: keyboard focus in the running app (the launch
+  environment keeps focus in the terminal that started it), the Edit menu
+  Copy/Paste, the scrollbar by mouse, IME composition. These paths are
+  covered by automated tests through a real `NSWindow`/`NSEvent`, except
+  menu routing and IME.
+- Server-driven window operations (move, minimise, raise) are ignored;
+  resize requests resize the window. Terminal-parity work (M06) covers
+  the remaining keyboard options (e.g. Ctrl+Shift+C/V, Alt-numpad codes),
+  bell options (wave file), blinking-text timing checks and printing.
+- No flow control between the main thread and the terminal beyond
+  PuTTY's own backlog (M14).
+- arm64 slice built and linked; tests not run (x86_64 host).
 
 ## M02 — Session executor and event loop
 
@@ -55,7 +162,7 @@
   - `0003-network-free-connect-error-message.patch`: each failed
     asynchronous connection attempt leaked its error text.
   - Planned patches renumbered: status hook `0004`, H-1 fix `0005`, H-2
-    fix `0006`.
+    fix `0006` (renumbered again in M03).
 - **Swift** (`Sources/PuTTYBridge`): `PuTTYSession` (replaces
   `PuTTYSessionHandle`) delivers `PuTTYSessionEvent`s on an `AsyncStream`
   that finishes after teardown. `PuTTYCore` gains `isCoreThread`,

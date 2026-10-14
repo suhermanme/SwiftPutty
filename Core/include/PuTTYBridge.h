@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 2
+#define SPB_API_VERSION 3
 
 /* ---------- Library information ---------- */
 
@@ -143,6 +143,14 @@ void spb_settings_normalise(spb_settings *settings);
 
 typedef struct spb_session spb_session;
 
+/* Clipboards, as PuTTY's Unix frontend has them (see
+ * docs/CONFIGURATION_PARITY.md): the general pasteboard, and the "last
+ * selected text" that mouse selection and middle-button paste use. */
+typedef enum spb_clipboard {
+    SPB_CLIPBOARD_SELECTION,  /* PuTTY CLIP_PRIMARY: app-private buffer */
+    SPB_CLIPBOARD_SYSTEM,     /* PuTTY CLIP_CLIPBOARD: NSPasteboard.general */
+} spb_clipboard;
+
 typedef enum spb_session_state {
     SPB_SESSION_CREATED,      /* not started yet */
     SPB_SESSION_CONNECTING,   /* started; the backend is not ready for input */
@@ -164,13 +172,32 @@ typedef struct spb_session_callbacks {
                           const char *detail);
     /* One line of PuTTY's Event Log. */
     void (*event_log)(void *ctx, const char *line);
-    /* Data received from the backend (raw bytes; no terminal yet). */
+    /* A copy of the data received from the backend, before the terminal
+     * interprets it (diagnostics and tests). */
     void (*output)(void *ctx, const void *data, size_t len, bool is_stderr);
     /* The remote end exited; exit_code as PuTTY's backend_exitcode()
      * (INT32_MAX for an unclean exit). Reported before CLOSED. */
     void (*remote_exit)(void *ctx, int32_t exit_code);
     /* Final call; see above. */
     void (*released)(void *ctx);
+
+    /* --- Terminal (M03) --- */
+
+    /* The terminal has a new frame; read it with spb_session_read_frame.
+     * Not called again until the frame has been read. */
+    void (*terminal_updated)(void *ctx);
+    /* Window or icon title set by the terminal (UTF-8). */
+    void (*title_changed)(void *ctx, const char *title, bool icon_title);
+    /* The terminal rang the bell; mode as CONF_beep (BELL_*). */
+    void (*bell)(void *ctx, int32_t mode);
+    /* Put text on a clipboard (UTF-8). */
+    void (*clipboard_write)(void *ctx, spb_clipboard clipboard,
+                            const char *text, size_t len);
+    /* The terminal wants a paste: answer with spb_session_paste. */
+    void (*paste_requested)(void *ctx, spb_clipboard clipboard);
+    /* The remote end asked for a terminal size (e.g. DECCOLM). The
+     * request is acknowledged at once; the frontend may resize. */
+    void (*resize_requested)(void *ctx, int32_t cols, int32_t rows);
 } spb_session_callbacks;
 
 /*
@@ -219,15 +246,177 @@ uint64_t spb_session_id(const spb_session *session);
  */
 spb_settings *spb_session_copy_settings(const spb_session *session);
 
+/* ---------- Terminal ----------
+ *
+ * Every session has a PuTTY Terminal (terminal/terminal.c) on the core
+ * thread. Its drawing is recorded into a grid of resolved cells and
+ * published as frames (docs/ARCHITECTURE.md section 8). The terminal is
+ * created with the Conf's TermWidth x TermHeight and resized with
+ * spb_session_resize.
+ */
+
+#define SPB_CELL_MAX_CHARS 4
+
+enum {
+    SPB_CELL_BOLD           = 1u << 0,  /* draw with a bold font */
+    SPB_CELL_UNDERLINE      = 1u << 1,
+    SPB_CELL_STRIKE         = 1u << 2,
+    SPB_CELL_WIDE           = 1u << 3,  /* first half of a two-column char */
+    SPB_CELL_WIDE_CONT      = 1u << 4,  /* second half: draw nothing */
+    SPB_CELL_CURSOR         = 1u << 5,  /* draw the cursor overlay here */
+    SPB_CELL_CURSOR_PASSIVE = 1u << 6,  /* ...as the unfocused form */
+    SPB_CELL_CURSOR_RIGHT   = 1u << 7,  /* vertical-line cursor at the right */
+    SPB_CELL_TRUST_SIGIL    = 1u << 8,  /* PuTTY's trust sigil (2 columns) */
+};
+
+/* One terminal cell, with colours already resolved (reverse video, bold
+ * as colour, dim, true colour, active block cursor). */
+typedef struct spb_cell {
+    /* Base character then combining characters, Unicode; unused slots
+     * are 0. chars[0] == 0 means blank. */
+    uint32_t chars[SPB_CELL_MAX_CHARS];
+    uint32_t fg, bg;                     /* 0xRRGGBB */
+    uint32_t flags;                      /* SPB_CELL_* */
+} spb_cell;
+
+typedef enum spb_line_attr {
+    SPB_LINE_NORMAL,
+    SPB_LINE_DOUBLE_WIDTH,     /* DECDWL: cells are 2 columns wide */
+    SPB_LINE_DOUBLE_TOP,       /* DECDHL top half */
+    SPB_LINE_DOUBLE_BOTTOM,    /* DECDHL bottom half */
+} spb_line_attr;
+
+typedef enum spb_cursor_style {
+    SPB_CURSOR_BLOCK,          /* active block: in the cell colours */
+    SPB_CURSOR_UNDERLINE,
+    SPB_CURSOR_VERTICAL_LINE,
+} spb_cursor_style;
+
+typedef struct spb_frame_info {
+    int32_t cols, rows;
+    /* All rows must be treated as changed (first read, or a resize). */
+    bool full;
+    spb_cursor_style cursor_style;
+    uint32_t cursor_colour;              /* overlay cursors, 0xRRGGBB */
+    uint32_t default_fg, default_bg;     /* window background etc. */
+    int32_t cursor_x, cursor_y;          /* text cursor (input methods) */
+    /* Scrollback, as PuTTY's set_scrollbar: lines in total, first
+     * visible line, visible lines. */
+    int32_t scroll_total, scroll_start, scroll_page;
+    bool raw_mouse;                      /* the application wants mouse events */
+    bool raw_mouse_pointer;              /* show the mouse-reporting pointer */
+} spb_frame_info;
+
+/*
+ * Copy the latest frame. `cells` holds rows * cols cells (row-major) and
+ * persists between calls: only rows marked in `dirty_rows` (one byte per
+ * row) are written, unless info->full. `line_attrs` (one per row) is
+ * always written. Returns false without copying cells if a capacity is
+ * too small (info still says the required size), or if the terminal does
+ * not exist yet (info->cols == 0). May be called from any thread.
+ */
+bool spb_session_read_frame(spb_session *session, spb_frame_info *info,
+                            spb_cell *cells, size_t cells_capacity,
+                            uint8_t *line_attrs, uint8_t *dirty_rows,
+                            size_t rows_capacity);
+
+/* Terminal size in character cells, plus the pixel size reported to
+ * applications that ask. Resizes the terminal and tells the backend. */
+void spb_session_resize(spb_session *session, int32_t cols, int32_t rows,
+                        int32_t pixel_width, int32_t pixel_height);
+
+/* Keyboard focus (cursor becomes passive without it). */
+void spb_session_set_focus(spb_session *session, bool focused);
+
+/* Modifiers for key, text and mouse input. META is the frontend's
+ * resolved Meta key (Option or Command, per OSXOptionMeta and
+ * OSXCommandMeta). */
+enum {
+    SPB_MOD_SHIFT = 1u << 0,
+    SPB_MOD_CTRL  = 1u << 1,
+    SPB_MOD_META  = 1u << 2,
+};
+
+typedef enum spb_key {
+    SPB_KEY_UP, SPB_KEY_DOWN, SPB_KEY_RIGHT, SPB_KEY_LEFT, SPB_KEY_BEGIN,
+    SPB_KEY_HOME, SPB_KEY_END, SPB_KEY_INSERT, SPB_KEY_DELETE,
+    SPB_KEY_PAGE_UP, SPB_KEY_PAGE_DOWN,
+    SPB_KEY_RETURN, SPB_KEY_BACKSPACE, SPB_KEY_TAB, SPB_KEY_ESCAPE,
+    SPB_KEY_F1,                /* F1 ... F20 are SPB_KEY_F1 + 0 ... 19 */
+    SPB_KEY_F20 = SPB_KEY_F1 + 19,
+    SPB_KEY_KP_0,              /* keypad 0 ... 9 are SPB_KEY_KP_0 + n */
+    SPB_KEY_KP_9 = SPB_KEY_KP_0 + 9,
+    SPB_KEY_KP_DECIMAL, SPB_KEY_KP_ENTER, SPB_KEY_KP_PLUS, SPB_KEY_KP_MINUS,
+    SPB_KEY_KP_MULTIPLY, SPB_KEY_KP_DIVIDE,
+    SPB_KEY_KP_NUM_LOCK,       /* the Mac keypad's Clear key */
+} spb_key;
+
+/*
+ * A non-text key, translated as GTK PuTTY does (unix/window.c key_event)
+ * with PuTTY's own formatters: cursor and keypad modes, function key
+ * type, Backspace and Return settings, Shift-PageUp scrollback, and
+ * Shift-Insert paste.
+ */
+void spb_session_key(spb_session *session, spb_key key, uint32_t mods);
+
+/* Typed or input-method text (UTF-8). With SPB_MOD_META it is sent
+ * prefixed with Escape, as PuTTY does for Alt. */
+void spb_session_text(spb_session *session, const char *utf8, size_t len,
+                      uint32_t mods);
+
+/* Input-method composition text (UTF-8), drawn by the terminal at the
+ * cursor as GTK PuTTY does; NULL or "" ends the composition. */
+void spb_session_set_preedit(spb_session *session, const char *utf8);
+
+/* Paste text (UTF-8): bracketed-paste aware, as term_do_paste. */
+void spb_session_paste(spb_session *session, const char *utf8, size_t len);
+
+typedef enum spb_mouse_button {
+    SPB_MOUSE_LEFT, SPB_MOUSE_MIDDLE, SPB_MOUSE_RIGHT,
+} spb_mouse_button;
+
+typedef enum spb_mouse_action {
+    SPB_MOUSE_CLICK, SPB_MOUSE_DOUBLE_CLICK, SPB_MOUSE_TRIPLE_CLICK,
+    SPB_MOUSE_DRAG, SPB_MOUSE_RELEASE, SPB_MOUSE_MOVE,
+} spb_mouse_action;
+
+/* A mouse event at a cell position (may be outside the terminal while
+ * dragging). Buttons are mapped to select/extend/paste as Windows PuTTY
+ * does, according to MouseIsXterm. */
+void spb_session_mouse(spb_session *session, spb_mouse_button button,
+                       spb_mouse_action action, int32_t x, int32_t y,
+                       uint32_t mods);
+
+/* Scroll-wheel notches (positive = towards the top). Sent to the
+ * application in raw mouse mode (unless Shift is held), otherwise
+ * scrolls the scrollback. */
+void spb_session_wheel(spb_session *session, int32_t notches, int32_t x,
+                       int32_t y, uint32_t mods);
+
+typedef enum spb_scroll_mode {
+    SPB_SCROLL_RELATIVE,       /* by `lines` (negative = up) */
+    SPB_SCROLL_TO_LINE,        /* first visible line = scroll_start value */
+    SPB_SCROLL_TO_BOTTOM,
+} spb_scroll_mode;
+
+/* Move the view over the scrollback (scrollbar, keyboard). */
+void spb_session_scroll(spb_session *session, spb_scroll_mode mode,
+                        int32_t lines);
+
+/* Copy the whole scrollback and screen to the system clipboard (PuTTY's
+ * "Copy All to Clipboard"). */
+void spb_session_copy_all(spb_session *session);
+
 /* ---------- Diagnostics ---------- */
 
 /* Number of sessions whose memory has not been freed yet: created and
  * either not released, or released with teardown still pending. */
 size_t spb_debug_live_sessions(void);
 
-/* File descriptors PuTTY had registered with uxsel at the start of the
- * core loop's most recent iteration (sockets and listeners; the loop's
- * own wake-up pipe is not counted). */
+/* File descriptors PuTTY has registered with uxsel (sockets and
+ * listeners; the loop's own wake-up pipe is not counted), counted on the
+ * core thread after all previously queued work. Waits for the core thread
+ * (like spb_core_barrier); 0 if the core is not running. */
 size_t spb_debug_uxsel_fds(void);
 
 /* Number of completed core loop iterations. */

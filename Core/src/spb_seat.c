@@ -2,27 +2,29 @@
  * spb_seat.c - the Seat and LogPolicy of a SwiftPutty session.
  *
  * Choices follow upstream's GTK frontend (unix/window.c gtk_seat_vt,
- * gtk_logpolicy_vt) wherever they do not need a terminal or a dialog.
- * Interactive prompts (passwords, host keys, weak crypto) are refused
- * until the SSH milestone (M04) gives them UI; with the Raw protocol, the
- * only one M02 starts, PuTTY never asks.
+ * gtk_logpolicy_vt) wherever they do not need a dialog. Interactive
+ * prompts (passwords, host keys, weak crypto) are refused until the SSH
+ * milestone (M04) gives them UI; with the Raw protocol PuTTY never asks.
  */
 
 #include <limits.h>
 
 #include "spb_internal.h"
+#include "terminal/terminal.h"         /* stripctrl_new_term */
 
 static spb_session *seat_session(Seat *seat)
 {
     return container_of(seat, spb_session, seat);
 }
 
+/* unix/window.c gtk_seat_output: everything goes to the terminal, whose
+ * backlog throttles the backend (TermWin unthrottle releases it). */
 static size_t spb_seat_output(Seat *seat, SeatOutputType type,
                               const void *data, size_t len)
 {
-    spb_session_emit_output(seat_session(seat), data, len,
-                            type == SEAT_OUTPUT_STDERR);
-    return 0;                          /* copied out immediately: no backlog */
+    spb_session *s = seat_session(seat);
+    spb_session_emit_output(s, data, len, type == SEAT_OUTPUT_STDERR);
+    return term_data(s->term, data, len);
 }
 
 static bool spb_seat_eof(Seat *seat)
@@ -80,10 +82,35 @@ static SeatPromptResult spb_seat_confirm_weak_cached_hostkey(
                         "yet in this build (milestone M09)");
 }
 
-/* SwiftPutty is UTF-8 throughout; the character set setting is applied
- * by the terminal (M03/M06). */
 static bool spb_seat_is_utf8(Seat *seat)
 {
+    return seat_session(seat)->ucsdata.line_codepage == CS_UTF8;
+}
+
+static char *spb_seat_get_ttymode(Seat *seat, const char *mode)
+{
+    return term_get_ttymode(seat_session(seat)->term, mode);
+}
+
+static bool spb_seat_get_window_pixel_size(Seat *seat, int *w, int *h)
+{
+    return spb_terminal_window_pixel_size(seat_session(seat), w, h);
+}
+
+static StripCtrlChars *spb_seat_stripctrl_new(
+    Seat *seat, BinarySink *bs_out, SeatInteractionContext sic)
+{
+    return stripctrl_new_term(bs_out, false, 0, seat_session(seat)->term);
+}
+
+static void spb_seat_set_trust_status(Seat *seat, bool trusted)
+{
+    term_set_trust_status(seat_session(seat)->term, trusted);
+}
+
+static bool spb_seat_get_cursor_position(Seat *seat, int *x, int *y)
+{
+    term_get_cursor_position(seat_session(seat)->term, x, y);
     return true;
 }
 
@@ -91,7 +118,7 @@ static const SeatVtable spb_seat_vt = {
     .output = spb_seat_output,
     .eof = spb_seat_eof,
     .sent = nullseat_sent,
-    .banner = nullseat_banner,
+    .banner = nullseat_banner_to_stderr,
     .get_userpass_input = spb_seat_get_userpass_input,
     .notify_session_started = nullseat_notify_session_started,
     .notify_remote_exit = spb_seat_notify_remote_exit,
@@ -99,7 +126,7 @@ static const SeatVtable spb_seat_vt = {
     .connection_fatal = spb_seat_connection_fatal,
     .nonfatal = spb_seat_nonfatal,
     .update_specials_menu = nullseat_update_specials_menu,
-    .get_ttymode = nullseat_get_ttymode,
+    .get_ttymode = spb_seat_get_ttymode,
     .set_busy_status = nullseat_set_busy_status,
     .confirm_ssh_host_key = spb_seat_confirm_ssh_host_key,
     .confirm_weak_crypto_primitive = spb_seat_confirm_weak_crypto_primitive,
@@ -109,14 +136,14 @@ static const SeatVtable spb_seat_vt = {
     .echoedit_update = nullseat_echoedit_update,
     .get_display = nullseat_get_display,
     .get_windowid = nullseat_get_windowid,
-    .get_window_pixel_size = nullseat_get_window_pixel_size,
-    .stripctrl_new = nullseat_stripctrl_new,
-    .set_trust_status = nullseat_set_trust_status,
-    .can_set_trust_status = nullseat_can_set_trust_status_no,
+    .get_window_pixel_size = spb_seat_get_window_pixel_size,
+    .stripctrl_new = spb_seat_stripctrl_new,
+    .set_trust_status = spb_seat_set_trust_status,
+    .can_set_trust_status = nullseat_can_set_trust_status_yes,
     .has_mixed_input_stream = nullseat_has_mixed_input_stream_yes,
     .verbose = nullseat_verbose_yes,
     .interactive = nullseat_interactive_yes,
-    .get_cursor_position = nullseat_get_cursor_position,
+    .get_cursor_position = spb_seat_get_cursor_position,
 };
 
 /* ---------- LogPolicy ---------- */
@@ -146,11 +173,12 @@ static int spb_askappend(LogPolicy *lp, Filename *filename,
     return 0;
 }
 
-/* GTK PuTTY writes these to the terminal; until the terminal exists
- * (M03) they go to the event log. */
+/* unix/window.c gtk_logging_error: shown in the terminal window. */
 static void spb_logging_error(LogPolicy *lp, const char *event)
 {
-    spb_session_emit_event_log(logpolicy_session(lp), event);
+    spb_session *s = logpolicy_session(lp);
+    seat_stderr_pl(&s->seat, ptrlen_from_asciz(event));
+    seat_stderr_pl(&s->seat, PTRLEN_LITERAL("\r\n"));
 }
 
 static const LogPolicyVtable spb_logpolicy_vt = {

@@ -80,7 +80,7 @@ the GTK/Windows frontends. There is no C-level add/remove-tunnel API. To avoid
 when it is the same) based on structured status events (ARCHITECTURE §6.4).
 A preference can disable staging for strict upstream parity.
 **Consequences:** Forwarding semantics are PuTTY's. One small upstream patch
-(`0004`) is needed for structured status.
+(`0005`) is needed for structured status.
 
 ## D-006 — Build PuTTY per architecture, then lipo
 
@@ -117,7 +117,7 @@ upstream `main`. H-1: removing a remote forward with a pending
 `tcpip-forward` reply. H-2: a duplicate remote listen address leaves a freed
 record in the manager tree. Both sit on the release-blocking live-tunnel
 path.
-**Decision:** Carry minimal patches `0005`/`0006`, prove each with an ASan
+**Decision:** Carry minimal patches `0006`/`0007`, prove each with an ASan
 regression test in M08, and offer them upstream. Add defence in depth in
 Swift: serialise remote-forward changes per port, and reject duplicate
 listen addresses during validation.
@@ -305,3 +305,62 @@ are not tests (loopback servers) live in the non-product `TestServers`
 target.
 **Consequences:** Deterministic diagnostics assertions; the whole Swift
 suite takes a few seconds.
+
+## D-021 — Terminal frames: resolved cells, published under a paint lock, pulled on notification
+
+**Status:** Accepted (M03); refines D-007
+**Context:** PuTTY's Terminal draws through `TermWin` on the core thread;
+AppKit draws on the main thread. Copying per character, or per call,
+would be slow. Redrawing from raw PuTTY attributes in Swift would mean
+re-implementing GTK's colour rules there.
+**Decision:** The TermWin writes into one grid of cells per session,
+with colours resolved as GTK PuTTY resolves them. The grid is the
+published frame: a mutex is held from `setup_draw_ctx` to
+`free_draw_ctx`, so a reader never sees half a paint. TermWin calls that
+PuTTY makes in the middle of a paint (scrollbar, palette) record their
+change under the held lock. After a change, `terminal_updated` fires once
+and is re-armed only when the frontend reads the frame, which copies only
+the dirty rows into the frontend's own buffer.
+**Consequences:** Rendering in Swift is "fill backgrounds, draw glyphs,
+decorate". Frame traffic is bounded by how fast the main thread reads,
+and PuTTY's own update timer batches output first: 20,000 lines produce
+single-digit notifications. The paint holds the lock briefly; readers
+copy only changed rows.
+
+## D-022 — Clipboards follow PuTTY's Unix model
+
+**Status:** Accepted (M03)
+**Context:** The core is built with upstream's Unix (X11) clipboard
+definitions: mouse selection goes to `CLIP_PRIMARY`, explicit copy and
+paste to `CLIP_CLIPBOARD`. macOS has no primary selection.
+**Decision:** `CLIP_PRIMARY` is an app-private "last selected text"
+buffer, shared by all session windows (as X's PRIMARY is shared).
+`CLIP_CLIPBOARD` is the general pasteboard. The bridge registers both
+with each Terminal as GTK's `setup_clipboards` does, honouring
+`MouseAutocopy` and `MousePaste`. Edit > Copy (⌘C) puts the window's
+latest selection on the general pasteboard; Edit > Paste (⌘V) pastes
+from it. Named X11 clipboards (`CLIPUI_CUSTOM`) behave as "none".
+**Consequences:** PuTTY's selection, paste and Copy All semantics are
+upstream's. Windows PuTTY's default of auto-copying selections to the
+system clipboard is available through the existing `MouseAutocopy`
+setting (configuration UI in M05/M12).
+
+## D-023 — Keyboard: Swift classifies, PuTTY translates
+
+**Status:** Accepted (M03)
+**Context:** Key translation depends on terminal modes (cursor/keypad
+application mode, function key type, Backspace setting), which live on
+the core thread. macOS key events carry layout-dependent text and
+layout-independent key codes.
+**Decision:** `TerminalKeyMapper` (Swift) recognises the keys PuTTY
+translates by key code and passes them as `spb_key` + modifiers. C
+translates them with GTK PuTTY's `key_event` logic and PuTTY's own
+`format_*_key` functions. Ordinary text goes through the macOS input
+method (`NSTextInputClient`), so dead keys and IMEs work; composition
+text is drawn by PuTTY at the cursor. Control combinations are sent as
+control characters. Option is Meta when `OSXOptionMeta` is set
+(upstream's default is on); Command is Meta only with `OSXCommandMeta`,
+otherwise Command shortcuts go to the menus.
+**Consequences:** Byte sequences match upstream exactly and follow
+terminal modes. With Option as Meta, Option-layer characters need
+`OSXOptionMeta` off (configuration UI in M05).

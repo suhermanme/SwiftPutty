@@ -48,12 +48,38 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case stateChanged(PuTTYSessionState, detail: String?)
     /// One line of PuTTY's Event Log.
     case eventLog(String)
-    /// Data received from the connection. Raw bytes until the terminal
-    /// exists (M03).
+    /// A copy of the data received from the connection, before the
+    /// terminal interprets it.
     case output(Data, isStderr: Bool)
     /// The remote end exited (`Int32.max` for an unclean exit). Arrives
     /// before `.stateChanged(.closed, …)`.
     case remoteExit(code: Int32)
+    /// The terminal has a new frame: read it with ``TerminalScreen/update(from:)``.
+    /// Not sent again until the frame has been read.
+    case terminalUpdated
+    /// The terminal set the window title (or the icon title).
+    case titleChanged(String, isIconTitle: Bool)
+    /// The terminal rang the bell; `mode` is PuTTY's `CONF_beep` value.
+    case bell(mode: Int32)
+    /// Put text on a clipboard.
+    case clipboardWrite(PuTTYClipboard, String)
+    /// The terminal wants a paste: answer with ``PuTTYSession/paste(_:)``.
+    case pasteRequested(PuTTYClipboard)
+    /// The application asked for a terminal size (already acknowledged).
+    case resizeRequested(cols: Int, rows: Int)
+}
+
+/// The clipboards PuTTY's terminal uses (docs/CONFIGURATION_PARITY.md).
+public enum PuTTYClipboard: Sendable, Equatable {
+    /// "Last selected text": an app-private buffer that mouse selection
+    /// writes and middle/right-button paste reads (PuTTY `CLIP_PRIMARY`).
+    case selection
+    /// The general pasteboard (PuTTY `CLIP_CLIPBOARD`).
+    case system
+
+    init(_ clipboard: spb_clipboard) {
+        self = clipboard == SPB_CLIPBOARD_SYSTEM ? .system : .selection
+    }
 }
 
 /// One PuTTY session, executed on the process-wide PuTTY core thread.
@@ -100,6 +126,30 @@ public final class PuTTYSession: Sendable {
             released: { ctx in
                 // Balances passRetained: the last call made with ctx.
                 Unmanaged<EventSink>.fromOpaque(ctx!).takeRetainedValue().finish()
+            },
+            terminal_updated: { ctx in
+                EventSink.from(ctx).yield(.terminalUpdated)
+            },
+            title_changed: { ctx, title, isIcon in
+                guard let title else { return }
+                EventSink.from(ctx).yield(.titleChanged(String(cString: title), isIconTitle: isIcon))
+            },
+            bell: { ctx, mode in
+                EventSink.from(ctx).yield(.bell(mode: mode))
+            },
+            clipboard_write: { ctx, clipboard, text, length in
+                guard let text else { return }
+                let data = Data(bytes: text, count: length)
+                var string = String(decoding: data, as: UTF8.self)
+                // PuTTY's Unix selection buffers are NUL-terminated.
+                while string.hasSuffix("\0") { string.removeLast() }
+                EventSink.from(ctx).yield(.clipboardWrite(PuTTYClipboard(clipboard), string))
+            },
+            paste_requested: { ctx, clipboard in
+                EventSink.from(ctx).yield(.pasteRequested(PuTTYClipboard(clipboard)))
+            },
+            resize_requested: { ctx, cols, rows in
+                EventSink.from(ctx).yield(.resizeRequested(cols: Int(cols), rows: Int(rows)))
             })
 
         var error: UnsafeMutablePointer<CChar>?
@@ -148,6 +198,98 @@ public final class PuTTYSession: Sendable {
     /// Disconnects; the session becomes ``PuTTYSessionState/closed``.
     public func close() {
         spb_session_close(handle)
+    }
+
+    // MARK: Terminal input
+
+    /// A non-text key, translated by PuTTY (cursor and keypad modes,
+    /// function key type, Backspace and Return settings, Shift-PageUp
+    /// scrollback, Shift-Insert paste).
+    public func key(_ key: TerminalKey, modifiers: TerminalModifiers = []) {
+        spb_session_key(handle, key.bridgeValue, modifiers.rawValue)
+    }
+
+    /// Typed or input-method text. With ``TerminalModifiers/meta`` it is
+    /// prefixed with Escape.
+    public func type(_ text: String, modifiers: TerminalModifiers = []) {
+        let bytes = Array(text.utf8)
+        guard !bytes.isEmpty else { return }
+        bytes.withUnsafeBufferPointer { buffer in
+            buffer.withMemoryRebound(to: CChar.self) {
+                spb_session_text(handle, $0.baseAddress, $0.count, modifiers.rawValue)
+            }
+        }
+    }
+
+    /// Input-method composition text, drawn by the terminal at the
+    /// cursor; nil or empty ends the composition.
+    public func setPreedit(_ text: String?) {
+        if let text, !text.isEmpty {
+            spb_session_set_preedit(handle, text)
+        } else {
+            spb_session_set_preedit(handle, nil)
+        }
+    }
+
+    /// Pastes text (bracketed-paste aware).
+    public func paste(_ text: String) {
+        let bytes = Array(text.utf8)
+        guard !bytes.isEmpty else { return }
+        bytes.withUnsafeBufferPointer { buffer in
+            buffer.withMemoryRebound(to: CChar.self) {
+                spb_session_paste(handle, $0.baseAddress, $0.count)
+            }
+        }
+    }
+
+    /// A mouse event at a cell position.
+    public func mouse(_ button: TerminalMouseButton, _ action: TerminalMouseAction,
+                      column: Int, row: Int, modifiers: TerminalModifiers = []) {
+        spb_session_mouse(handle, button.bridgeValue, action.bridgeValue,
+                          Int32(clamping: column), Int32(clamping: row), modifiers.rawValue)
+    }
+
+    /// Scroll-wheel notches (positive = up): to the application in raw
+    /// mouse mode, otherwise five lines of scrollback each.
+    public func wheel(notches: Int, column: Int, row: Int, modifiers: TerminalModifiers = []) {
+        spb_session_wheel(handle, Int32(clamping: notches), Int32(clamping: column),
+                          Int32(clamping: row), modifiers.rawValue)
+    }
+
+    /// Moves the view over the scrollback.
+    public func scroll(_ scroll: TerminalScroll) {
+        switch scroll {
+        case .lines(let lines):
+            spb_session_scroll(handle, SPB_SCROLL_RELATIVE, Int32(clamping: lines))
+        case .toLine(let line):
+            spb_session_scroll(handle, SPB_SCROLL_TO_LINE, Int32(clamping: line))
+        case .toBottom:
+            spb_session_scroll(handle, SPB_SCROLL_TO_BOTTOM, 0)
+        }
+    }
+
+    /// Sets the terminal size in cells, and the pixel size reported to
+    /// applications that ask.
+    public func resize(columns: Int, rows: Int, pixelWidth: Int = 0, pixelHeight: Int = 0) {
+        spb_session_resize(handle, Int32(clamping: columns), Int32(clamping: rows),
+                           Int32(clamping: pixelWidth), Int32(clamping: pixelHeight))
+    }
+
+    /// Keyboard focus; without it the cursor is drawn passive.
+    public func setFocus(_ focused: Bool) {
+        spb_session_set_focus(handle, focused)
+    }
+
+    /// Copies the whole scrollback and screen to the system clipboard.
+    public func copyAll() {
+        spb_session_copy_all(handle)
+    }
+
+    func readFrame(info: inout spb_frame_info, cells: UnsafeMutablePointer<spb_cell>?,
+                   cellCapacity: Int, lineAttributes: UnsafeMutablePointer<UInt8>?,
+                   dirtyRows: UnsafeMutablePointer<UInt8>?, rowCapacity: Int) -> Bool {
+        spb_session_read_frame(handle, &info, cells, cellCapacity, lineAttributes,
+                               dirtyRows, rowCapacity)
     }
 
     /// Snapshot of the session's configuration.

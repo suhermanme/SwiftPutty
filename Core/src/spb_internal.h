@@ -59,6 +59,13 @@ struct spb_session {
     LogPolicy logpolicy;
     LogContext *logctx;
     Backend *backend;
+    Ldisc *ldisc;
+
+    /* Terminal (spb_terminal.c); term is created on the core thread. */
+    Terminal *term;
+    TermWin termwin;
+    struct unicode_data ucsdata;
+    struct spb_screen *screen;         /* drawing grid + published frame */
     spb_session_state state;
     bool exited;                       /* connection gone or going */
 
@@ -82,6 +89,19 @@ void spb_session_connection_fatal(spb_session *s, const char *message);
 
 /* spb_seat.c: the session's Seat and LogPolicy */
 void spb_seat_init(spb_session *s);
+
+/* spb_terminal.c */
+struct spb_screen *spb_screen_new(void);         /* any thread */
+void spb_screen_free(struct spb_screen *screen); /* after the terminal */
+void spb_terminal_create(spb_session *s);        /* core thread */
+void spb_terminal_free(spb_session *s);          /* core thread */
+void spb_terminal_resize(spb_session *s, int cols, int rows,
+                         int pixel_width, int pixel_height);
+bool spb_terminal_window_pixel_size(spb_session *s, int *w, int *h);
+bool spb_terminal_raw_mouse(spb_session *s);     /* core thread */
+
+/* spb_input.c: keyboard, mouse and paste translation (core thread) */
+void spb_input_key(spb_session *s, spb_key key, uint32_t mods);
 
 void spb_set_error(char **err_out, const char *fmt, ...)
     PRINTF_LIKE(2, 3);

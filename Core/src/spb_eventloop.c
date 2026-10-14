@@ -44,7 +44,6 @@ static pthread_t core_thread;
 static atomic_bool core_thread_running;
 static bool stop_requested;                   /* core thread only */
 
-static atomic_size_t uxsel_fd_count;
 static atomic_uint_fast64_t loop_iterations;
 
 bool spb_loop_on_core_thread(void)
@@ -221,7 +220,6 @@ static void *core_thread_main(void *arg)
             fdlist[fdcount++] = fd;
             pollwrap_add_fd_rwx(pw, fd, rwx);
         }
-        atomic_store(&uxsel_fd_count, fdcount);
 
         if (toplevel_callback_pending()) {
             ret = pollwrap_poll_instant(pw);
@@ -354,9 +352,21 @@ void spb_loop_stop(void)
     wake_pipe[0] = wake_pipe[1] = -1;
 }
 
+static void count_uxsel_fds(void *vctx)
+{
+    size_t *count = vctx;
+    int rwx, fdstate;
+    for (int fd = first_fd(&fdstate, &rwx); fd >= 0;
+         fd = next_fd(&fdstate, &rwx))
+        (*count)++;
+}
+
 size_t spb_debug_uxsel_fds(void)
 {
-    return atomic_load(&uxsel_fd_count);
+    /* Counted on the core thread, after everything queued before. */
+    size_t count = 0;
+    spb_loop_run_sync(count_uxsel_fds, &count);
+    return count;
 }
 
 uint64_t spb_debug_loop_iterations(void)

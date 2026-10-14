@@ -13,10 +13,10 @@ is © Simon Tatham and contributors, MIT licensed. See
 ## Status
 
 Milestones **M00** (analysis and architecture), **M01** (build skeleton
-and PuTTY core integration) and **M02** (session executor and event loop)
-are complete. The PuTTY core runs on its own thread, and sessions connect
-and exchange data through it (Raw protocol, exercised by tests). There is
-no terminal, session UI or SSH connectivity yet. See
+and PuTTY core integration), **M02** (session executor and event loop) and
+**M03** (terminal rendering foundation) are complete. The app opens Raw
+connections in terminal windows driven by PuTTY's own terminal emulator.
+SSH, saved sessions and the configuration dialog are not there yet. See
 `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Building
@@ -39,7 +39,7 @@ work can use `swift build` / `swift test` at the repository root.
 
 ```
 App/            SwiftUI app (Xcode project)
-Sources/        Swift modules (PuTTYBridge, SessionLayer; TestServers for tests) — Package.swift at the root
+Sources/        Swift modules (PuTTYBridge, SessionLayer, TerminalUI; TestServers for tests) — Package.swift at the root
 Tests/          Swift tests
 Core/           C bridge: PuTTYBridge.h, bridge sources, CMake integration, C tests
 Vendor/putty/   pristine PuTTY 0.85 source (never edited; see patches/)

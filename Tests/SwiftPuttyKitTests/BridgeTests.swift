@@ -158,9 +158,11 @@ extension KitTests {
             var session: PuTTYSession? = try PuTTYSession(settings: .defaults())
             let events = session!.events
             session = nil
+            // The terminal may publish its first frame before the release;
+            // nothing else can happen to a session that never started.
             var received: [PuTTYSessionEvent] = []
             for await event in events { received.append(event) }
-            #expect(received.isEmpty)
+            #expect(received.allSatisfy { $0 == .terminalUpdated })
         }
     }
 }

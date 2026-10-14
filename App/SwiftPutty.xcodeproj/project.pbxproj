@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		5A0000000000000000000101 /* PuTTYBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000701 /* PuTTYBridge */; };
+		5A0000000000000000000102 /* SessionLayer in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000702 /* SessionLayer */; };
+		5A0000000000000000000103 /* TerminalUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000703 /* TerminalUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +30,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				5A0000000000000000000101 /* PuTTYBridge in Frameworks */,
+				5A0000000000000000000102 /* SessionLayer in Frameworks */,
+				5A0000000000000000000103 /* TerminalUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,6 +76,8 @@
 			name = SwiftPutty;
 			packageProductDependencies = (
 				5A0000000000000000000701 /* PuTTYBridge */,
+				5A0000000000000000000702 /* SessionLayer */,
+				5A0000000000000000000703 /* TerminalUI */,
 			);
 			productName = SwiftPutty;
 			productReference = 5A0000000000000000000201 /* SwiftPutty.app */;
@@ -281,6 +287,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
 			productName = PuTTYBridge;
+		};
+		5A0000000000000000000702 /* SessionLayer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
+			productName = SessionLayer;
+		};
+		5A0000000000000000000703 /* TerminalUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
+			productName = TerminalUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

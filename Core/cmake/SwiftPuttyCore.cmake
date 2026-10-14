@@ -92,11 +92,13 @@ function(swiftputty_define_core)
     # SwiftPutty bridge
     ${B}/src/spb_core.c
     ${B}/src/spb_eventloop.c
+    ${B}/src/spb_input.c
     ${B}/src/spb_platform.c
     ${B}/src/spb_seat.c
     ${B}/src/spb_session.c
     ${B}/src/spb_settings.c
     ${B}/src/spb_storage.c
+    ${B}/src/spb_terminal.c
 
     # Event-loop primitives (upstream's 'eventloop' library minus
     # unix/cliloop.c, whose loop and uxsel hooks the bridge replaces)
@@ -151,7 +153,8 @@ function(swiftputty_define_core)
   # Bridge code is held to a stricter warning standard than upstream.
   set_source_files_properties(
     ${B}/src/spb_core.c ${B}/src/spb_eventloop.c ${B}/src/spb_platform.c
-    ${B}/src/spb_seat.c ${B}/src/spb_session.c
+    ${B}/src/spb_input.c ${B}/src/spb_seat.c ${B}/src/spb_session.c
+    ${B}/src/spb_terminal.c
     ${B}/src/spb_settings.c ${B}/src/spb_storage.c
     TARGET_DIRECTORY swiftputty-core
     PROPERTIES COMPILE_OPTIONS
@@ -175,6 +178,14 @@ function(swiftputty_define_core)
   target_compile_options(spb_session_test PRIVATE
     -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
   add_test(NAME spb_session_test COMMAND spb_session_test)
+
+  # The terminal: frames, keys, paste, mouse, scrollback (M03).
+  add_executable(spb_terminal_test ${B}/tests/spb_terminal_test.c)
+  set_property(TARGET spb_terminal_test PROPERTY LINK_LIBRARIES
+    swiftputty-core)
+  target_compile_options(spb_terminal_test PRIVATE
+    -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+  add_test(NAME spb_terminal_test COMMAND spb_terminal_test)
 
   # Link every archive member, not just the ones a program happens to
   # reference, so that any unresolved symbol in the core fails the build.

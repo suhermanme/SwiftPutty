@@ -9,7 +9,10 @@ extension KitTests {
         @Test func coreThreadIsNotTheCaller() throws {
             try TestCore.initialize()
             #expect(!PuTTYCore.isCoreThread)
+            // The second wait runs in a later loop iteration than the
+            // first, so at least one iteration has completed.
             let before = PuTTYCore.coreLoopIterations
+            #expect(PuTTYCore.waitForPendingWork())
             #expect(PuTTYCore.waitForPendingWork())
             #expect(PuTTYCore.coreLoopIterations > before)
         }
@@ -143,8 +146,12 @@ extension KitTests {
             session.start()
             #expect(await collector.wait(for: .connected))
 
+            // Printable text: the terminal answers some control sequences,
+            // and the echoed answers would add to the output.
             var generator = SystemRandomNumberGenerator()
-            let payload = Data((0..<(2 << 20)).map { _ in UInt8.random(in: 0...255, using: &generator) })
+            let payload = Data((0..<(2 << 20)).map { index in
+                index % 80 == 79 ? 0x0A : UInt8.random(in: 0x21...0x7E, using: &generator)
+            })
             stride(from: 0, to: payload.count, by: 64 << 10).forEach {
                 session.send(payload[$0..<min($0 + (64 << 10), payload.count)])
             }

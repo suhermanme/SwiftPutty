@@ -2,12 +2,26 @@ import Foundation
 import Observation
 import PuTTYBridge
 
+/// Receives a session's terminal events on the main actor (the terminal
+/// view, in the app).
+@MainActor
+public protocol SessionTerminalDelegate: AnyObject {
+    /// A new frame is ready: read it with `TerminalScreen.update(from:)`.
+    func terminalDidUpdate(_ controller: SessionController)
+    func terminal(_ controller: SessionController, ringBell mode: Int32)
+    func terminal(_ controller: SessionController, write text: String, to clipboard: PuTTYClipboard)
+    /// Answer with `PuTTYSession.paste(_:)`.
+    func terminal(_ controller: SessionController, requestsPasteFrom clipboard: PuTTYClipboard)
+    func terminal(_ controller: SessionController, requestsResizeTo columns: Int, rows: Int)
+}
+
 /// The main-actor model of one PuTTY session: what a session window
 /// observes and drives.
 ///
 /// The session itself runs on the PuTTY core thread; its events hop to
-/// the main actor here, in order. Received output is kept in a bounded
-/// transcript until the terminal (M03) consumes it.
+/// the main actor here, in order. Terminal events go to
+/// ``terminalDelegate``. A bounded transcript of the raw received data is
+/// kept for diagnostics.
 @MainActor
 @Observable
 public final class SessionController {
@@ -27,11 +41,18 @@ public final class SessionController {
     /// Total bytes received, including any dropped from ``transcript``.
     public private(set) var receivedByteCount = 0
     public private(set) var exitCode: Int32?
+    /// Window title set by the terminal (empty until set).
+    public private(set) var title = ""
+    /// Icon title set by the terminal.
+    public private(set) var iconTitle = ""
 
     /// Process-unique identifier of the running session, once started.
     public var sessionID: UInt64? { session?.id }
 
-    @ObservationIgnored private var session: PuTTYSession?
+    /// The running session, once ``connect()`` has created it: the
+    /// terminal view sends input and reads frames through it.
+    @ObservationIgnored public private(set) var session: PuTTYSession?
+    @ObservationIgnored public weak var terminalDelegate: SessionTerminalDelegate?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var stateWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -39,8 +60,9 @@ public final class SessionController {
         self.settings = settings
     }
 
-    /// Creates the PuTTY session and connects. Only valid once.
-    public func connect() throws(PuTTYBridgeError) {
+    /// Creates the PuTTY session (and its terminal) without connecting,
+    /// so that a view can attach first. ``connect()`` calls it if needed.
+    public func prepare() throws(PuTTYBridgeError) {
         guard session == nil else { return }
         let session = try PuTTYSession(settings: settings)
         self.session = session
@@ -53,7 +75,15 @@ public final class SessionController {
                 self.apply(event)
             }
         }
-        session.start()
+    }
+
+    /// Creates the session if needed and connects. Only valid once.
+    public func connect() throws(PuTTYBridgeError) {
+        let fresh = session == nil
+        try prepare()
+        if fresh || state == .created {
+            session?.start()
+        }
     }
 
     public func send(_ data: Data) {
@@ -104,6 +134,18 @@ public final class SessionController {
             }
         case .remoteExit(let code):
             exitCode = code
+        case .terminalUpdated:
+            terminalDelegate?.terminalDidUpdate(self)
+        case .titleChanged(let text, let isIconTitle):
+            if isIconTitle { iconTitle = text } else { title = text }
+        case .bell(let mode):
+            terminalDelegate?.terminal(self, ringBell: mode)
+        case .clipboardWrite(let clipboard, let text):
+            terminalDelegate?.terminal(self, write: text, to: clipboard)
+        case .pasteRequested(let clipboard):
+            terminalDelegate?.terminal(self, requestsPasteFrom: clipboard)
+        case .resizeRequested(let columns, let rows):
+            terminalDelegate?.terminal(self, requestsResizeTo: columns, rows: rows)
         }
     }
 }

@@ -345,7 +345,10 @@ static void timer_fired(void *ctx)
 static void test_core_thread_and_timers(void)
 {
     CHECK(!spb_core_is_core_thread());
+    /* A barrier returns while its iteration is still running; a second
+     * one runs in a later iteration, so the first has been counted. */
     uint64_t before = spb_debug_loop_iterations();
+    CHECK(spb_core_barrier());
     CHECK(spb_core_barrier());
     CHECK(spb_debug_loop_iterations() > before);
 
@@ -437,8 +440,11 @@ static void test_large_transfer(server *echo)
 {
     enum { SIZE = 4 << 20 };
     unsigned char *payload = malloc(SIZE);
+    /* Printable text: the terminal answers some control sequences, and
+     * the echoed answers would add to the output. */
     for (size_t i = 0; i < SIZE; i++)
-        payload[i] = (unsigned char)(i * 2654435761u >> 13);
+        payload[i] = (i % 80 == 79) ? '\n' :
+            (unsigned char)('!' + (i * 2654435761u >> 13) % 94);
 
     recorder r;
     rec_init(&r);

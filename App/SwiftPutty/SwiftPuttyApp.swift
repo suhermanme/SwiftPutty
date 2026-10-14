@@ -1,4 +1,5 @@
 import SwiftUI
+import TerminalUI
 
 @main
 struct SwiftPuttyApp: App {
@@ -6,8 +7,7 @@ struct SwiftPuttyApp: App {
 
     var body: some Scene {
         // The launcher window. In PuTTY the configuration dialog is the
-        // entry point and each session gets its own terminal window; the
-        // session windows arrive with SSH support (M04).
+        // entry point and each session gets its own terminal window.
         Window("SwiftPutty", id: WindowID.launcher) {
             LauncherView(model: appDelegate.model)
         }
@@ -15,6 +15,15 @@ struct SwiftPuttyApp: App {
         .commands {
             AppCommands()
         }
+
+        WindowGroup("Session", id: WindowID.session, for: SessionRequest.self) { $request in
+            if let request {
+                SessionWindow(request: request)
+            }
+        }
+        // PuTTY opens at the configured terminal size (default 80x24).
+        .defaultSize(TerminalView.defaultSize(for: .defaults()))
+        .windowResizability(.contentMinSize)
 
         Window("About SwiftPutty", id: WindowID.about) {
             AboutView()
@@ -26,6 +35,7 @@ struct SwiftPuttyApp: App {
 enum WindowID {
     static let launcher = "launcher"
     static let about = "about"
+    static let session = "session"
 }
 
 private struct AppCommands: Commands {
@@ -38,7 +48,12 @@ private struct AppCommands: Commands {
             }
         }
         // No document-style "New Window"; File > New Session arrives with
-        // the session launcher (M04/M05).
+        // the session launcher (M05).
         CommandGroup(replacing: .newItem) {}
+        CommandGroup(after: .pasteboard) {
+            Button("Copy All to Clipboard") {
+                NSApp.sendAction(#selector(TerminalView.copyAllToClipboard(_:)), to: nil, from: nil)
+            }
+        }
     }
 }

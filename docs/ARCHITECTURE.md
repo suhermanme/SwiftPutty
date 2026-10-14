@@ -46,7 +46,7 @@ for UI classification and for *staging* (§6.4), not as a C API.
 PuTTY reports forwarding outcomes only as Event Log text. A frontend that
 wants a structured "this tunnel is up / failed / refused" state therefore
 needs one small upstream patch: a status-notification hook (§7.3, patch
-`0004`). Two latent upstream memory-safety bugs on the remote-forward
+`0005`). Two latent upstream memory-safety bugs on the remote-forward
 removal path (§5.6) also need fixing, both in SwiftPutty's patch set and,
 ideally, upstream.
 
@@ -404,7 +404,7 @@ reads `log_description`. On failure it calls `del234(s->rportfwds, rpf)`
 the Apply that added it. This is likely under rapid UI changes, an automated
 test loop, or a slow/high-latency server. It is exactly the "repeat
 remote-forward changes many times" scenario the project must survive.
-*Fix (patch `0005`):* when an `rpf` with a pending reply is removed, mark it
+*Fix (patch `0006`):* when an `rpf` with a pending reply is removed, mark it
 `cancelled` and leave the free to the reply handler. If the reply was
 SUCCESS, also send `cancel-tcpip-forward` then (or, if it was already sent,
 just free). SwiftPutty additionally serialises remote-forward changes per
@@ -418,7 +418,7 @@ The next `portfwdmgr_config` (any Apply) or `portfwdmgr_free` touches freed
 memory. *Trigger:* two configured remote forwards that differ in key but map
 to the same server listen address, e.g. `R8080` and `4R8080`, or
 `R8080=a:80` alongside a connection-sharing downstream forwarding 8080.
-*Fix (patch `0006`):* `del234(mgr->forwardings, pfr)` before `pfr_free`,
+*Fix (patch `0007`):* `del234(mgr->forwardings, pfr)` before `pfr_free`,
 mirroring the destroy pass. SwiftPutty validation also rejects such
 configurations before Apply.
 
@@ -505,11 +505,11 @@ sequences `reconfigure` calls from Swift:
 For Windows-parity purists, a hidden preference can switch staging off
 (single-call PuTTY behaviour). It defaults to on.
 
-### 6.5 Structured forwarding status (needs patch `0004`)
+### 6.5 Structured forwarding status (needs patch `0005`)
 
 Swift needs per-tunnel state: `requested`, `listening`, `failed(msg)`,
 `remoteEnabled`, `remoteRefused`, `cancelled`. Upstream only logs text.
-Patch `0004` adds an optional `LogPolicyVtable.portfwd_status` method. It is
+Patch `0005` adds an optional `LogPolicyVtable.portfwd_status` method. It is
 NULL-checked, so all existing upstream implementers are unaffected through
 designated initialisers. Calls are added at the four outcome sites:
 `pfl_listen` result in the create pass, `ssh2_rportfwd_globreq_response`
@@ -682,7 +682,36 @@ upstream patches.
 
 ---
 
-## 8. Terminal frontend (proposed)
+## 8. Terminal frontend
+
+*Implemented in M03* (`Core/src/spb_terminal.c`, `Core/src/spb_input.c`,
+`Sources/TerminalUI`). Differences from the proposal below:
+
+- **Cells arrive resolved.** The TermWin resolves colours exactly as GTK
+  PuTTY's `do_text_internal` does (reverse video, bold as colour, dim at
+  2/3, true colour, the active block cursor's colours), so a cell is
+  characters + RGB foreground/background + flags (D-021). Overlay cursors
+  (passive block, underline, vertical line) are cell flags that the next
+  `draw_text` over that cell clears, which is exactly how they behave as
+  pixels in GTK.
+- **Pull, not display link.** The grid is the published frame, guarded
+  by a mutex that the core thread holds for the whole of a paint
+  (`setup_draw_ctx` … `free_draw_ctx`). After a paint, the frontend gets
+  one `terminal_updated` notification, and no more until it has read the
+  frame (`spb_session_read_frame`, which copies only the dirty rows).
+  PuTTY's own update timer already batches output, so 20,000 lines arrive
+  as single-digit frame counts. AppKit's display cycle paces redraws.
+- `char_width` returns 1, as in GTK PuTTY: double-width characters are
+  drawn across two cells.
+- Clipboards follow PuTTY's Unix model (D-022): mouse selection writes an
+  app-private "selection" buffer (`CLIP_PRIMARY`); `CLIP_CLIPBOARD` is the
+  general pasteboard. The frontend registers its clipboards with the
+  terminal as GTK's `setup_clipboards` does.
+- Keys: Swift classifies key events by key code (D-023); C translates them
+  with GTK's `key_event` logic and PuTTY's formatters. Input-method
+  composition text is drawn by PuTTY itself (`term_set_preedit_text`).
+
+The original proposal:
 
 - `Terminal` lives on the core thread. `term_update`/`term_paint` call
   `TermWin.draw_text`/`draw_cursor` *on the core thread*. The bridge's
@@ -726,7 +755,7 @@ Settings (as Windows hides them). It never silently reconnects.
 
 ## 10. Repository layout
 
-As of M02 (directories marked *planned* do not exist yet):
+As of M03 (directories marked *planned* do not exist yet):
 
 ```
 swift_putty/
@@ -738,12 +767,12 @@ swift_putty/
 │   ├── PuTTYBridge/               Swift wrapper; the only consumer of PuTTYBridge.h
 │   ├── SessionLayer/              SessionController (M02); configuration, diff (M05/M07)
 │   ├── TestServers/               test-only loopback TCP servers (not a product)
-│   ├── TerminalUI/                planned (M03+): TerminalNSView, renderer, input
+│   ├── TerminalUI/                TerminalView (AppKit), renderer, key mapping, font (M03)
 │   └── Persistence/               planned (M05): saved sessions (versioned Codable)
 ├── Tests/SwiftPuttyKitTests/      Swift tests (swift test; one serialized root suite)
 ├── Core/                          C side of the bridge
 │   ├── include/                   PuTTYBridge.h + module.modulemap (module PuTTYBridgeC)
-│   ├── src/                       spb_*.c: core, event loop (core thread), session, seat, settings, storage, platform
+│   ├── src/                       spb_*.c: core, event loop (core thread), session, seat, terminal (TermWin), input, settings, storage, platform
 │   ├── cmake/                     SwiftPuttyCore.cmake (injected into upstream's build), RepackArchive.cmake
 │   └── tests/                     C bridge tests (ctest)
 ├── Vendor/putty/                  pristine PuTTY 0.85
@@ -792,7 +821,7 @@ D-019). Differences from the §7 proposal:
 
 | ID | Risk | Mitigation / milestone |
 |---|---|---|
-| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0005`/`0006`; ASan reproduction tests (M08, M13); report upstream |
+| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0006`/`0007`; ASan reproduction tests (M08, M13); report upstream |
 | R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | Accept for M02–M10; measure; options: patch `name_lookup` to resolve on a helper thread, or per-session helper process (decide by M14) |
 | R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | Generic overlay over `conf_key_info[]`; round-trip test over all 211 keys in M07 |
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |

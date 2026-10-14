@@ -23,6 +23,8 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     writable, so a refused connection is reported on macOS.
   - `0003-network-free-connect-error-message.patch`: free the error text
     of a failed asynchronous connection attempt.
+  - `0004-terminal-free-last-selected-text.patch`: free the terminal's
+    last-selected-text buffers when the terminal is freed.
   - At compile time (no source change), the session-storage functions of
     `unix/storage.c` are renamed, so that SwiftPutty can supply its own
     session storage.

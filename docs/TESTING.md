@@ -1,8 +1,8 @@
 # Testing
 
-Status: **M02.** C bridge tests, core-thread and session tests against
-local TCP servers, and Swift package tests exist; SSH integration fixtures
-start in M04.
+Status: **M03.** C bridge, core-thread/session and terminal tests against
+local TCP servers, and Swift package tests (including pixel-level
+rendering) exist; SSH integration fixtures start in M04.
 
 ## Running the tests
 
@@ -20,8 +20,9 @@ swift test --sanitize=thread --scratch-path build/swiftpm-tsan
 |---|---|---|
 | `spb_bridge_test` (ctest) | `Core/tests/spb_bridge_test.c` | Public C API: library info, init/shutdown rules, defaults, normalisation, map editing, 20,000 create/destroy cycles, concurrent sessions, leak counters. Also run under `leaks --atExit`, ASan+UBSan and TSan |
 | `spb_session_test` (ctest) | `Core/tests/spb_session_test.c` | Core thread and executor (M02), against an in-process loopback TCP server: idle loop blocks, PuTTY timers fire in order and never early, Raw echo, input queued before connect, 4 MiB transfer intact, remote close (exit code, then CLOSED), refused connection, unknown host, SSH/Telnet refused until their milestone, 1,200 release paths (never started, connecting, connected with traffic), 128 sessions driven from 8 threads, descriptors return to baseline, shutdown straight after release. Also run under `leaks --atExit`, ASan+UBSan and TSan |
+| `spb_terminal_test` (ctest) | `Core/tests/spb_terminal_test.c` | The terminal (M03), with the test holding the server end of a Raw connection: initial frame and default palette; SGR colours (16, bold as colour, 256, true colour, reverse, dim, underline, strikethrough); wide, combining and astral characters; VT100 line drawing; DECDWL; active and passive cursor; OSC title and bell; resize and the application's resize request; scrollback (relative, wheel, Shift-PageUp, to bottom); exact bytes for cursor/keypad keys in normal and application modes, function keys, Backspace, Return, Tab, Meta, typed UTF-8; paste and bracketed paste; drag and double-click selection, right-button paste, Copy All; X11 mouse reporting and wheel; 20,000-line burst coalescing. Also run under `leaks --atExit`, ASan+UBSan and TSan |
 | `spb_link_closure_test` (ctest) | `Core/tests/spb_link_closure_test.c` | Force-loads every core archive member; the build fails on any unresolved symbol (both architectures) |
-| `SwiftPuttyKitTests` (Swift Testing) | `Tests/SwiftPuttyKitTests/` | Swift wrapper: bridge loads, licence, core lifecycle, settings conversion (including Unicode), session lifecycle and event streams, core thread, Raw sessions against `TestServers.LoopbackServer` (echo, Unicode, remote close, refused, unknown host, SSH not yet available, 100 concurrent sessions, 2 MiB transfer), `SessionController` (state, transcript bound, release on drop). One serialized root suite (D-020); also run under ASan and TSan |
+| `SwiftPuttyKitTests` (Swift Testing) | `Tests/SwiftPuttyKitTests/` | Swift wrapper: bridge loads, licence, core lifecycle, settings conversion (including Unicode), session lifecycle and event streams, core thread, Raw sessions against `TestServers.LoopbackServer` (echo, Unicode, remote close, refused, unknown host, SSH not yet available, 100 concurrent sessions, 2 MiB transfer), `SessionController` (state, transcript bound, release on drop); terminal through a real `TerminalView` in a window, driven by `TestServers.ScriptedPeer` (screen contents and colours, title, resize from window size, keyboard via synthesized `NSEvent`s, Option as Meta or not, paste and selection, scrollback, rendering checked pixel by pixel, screen kept after the session ends); key mapping and font parsing. One serialized root suite (D-020); also run under ASan and TSan. `SPB_RENDER_DUMP=<file.png>` saves the rendering test's bitmap |
 
 ## Principles
 

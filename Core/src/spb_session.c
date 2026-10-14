@@ -2,9 +2,8 @@
  * spb_session.c - sessions, executed on the PuTTY core thread.
  *
  * A session owns the PuTTY objects a frontend window owns upstream
- * (docs/ARCHITECTURE.md section 2.3): its Conf, a LogContext and a
- * Backend. The Terminal and Ldisc arrive with terminal rendering (M03)
- * and SSH (M04).
+ * (docs/ARCHITECTURE.md section 2.3): its Conf, a LogContext, a
+ * Terminal (spb_terminal.c), and while connected a Backend and an Ldisc.
  *
  * Every public entry point except create/id/copy_settings only posts a
  * command; the work happens on the core thread, in call order. The
@@ -91,10 +90,16 @@ static void destroy_connection(spb_session *s)
 {
     s->exited = true;
     active_remove(s);
+    if (s->ldisc) {
+        ldisc_free(s->ldisc);
+        s->ldisc = NULL;
+    }
     if (s->backend) {
         backend_free(s->backend);
         s->backend = NULL;
     }
+    if (s->term)
+        term_provide_backend(s->term, NULL);
     delete_callbacks_for_context(s);
 }
 
@@ -176,9 +181,9 @@ static void cmd_start(void *vctx)
         conf_get_str(s->conf, CONF_host), conf_get_int(s->conf, CONF_port),
         &realhost, conf_get_bool(s->conf, CONF_tcp_nodelay),
         conf_get_bool(s->conf, CONF_tcp_keepalives));
-    sfree(realhost);
 
     if (error) {
+        sfree(realhost);
         char *msg = dupprintf("Unable to open connection to %s:\n%s",
                               conf_dest(s->conf), error);
         sfree(error);
@@ -190,6 +195,10 @@ static void cmd_start(void *vctx)
         return;
     }
 
+    term_setup_window_titles(s->term, realhost);
+    sfree(realhost);
+    term_provide_backend(s->term, s->backend);
+    s->ldisc = ldisc_create(s->conf, s->term, s->backend, &s->seat);
     active_add(s);
 }
 
@@ -243,12 +252,19 @@ static void cmd_close(void *vctx)
     spb_session_set_state(s, SPB_SESSION_CLOSED, "Session closed by user");
 }
 
+static void cmd_setup_terminal(void *vctx)
+{
+    spb_terminal_create((spb_session *)vctx);
+}
+
 static void cmd_release(void *vctx)
 {
     spb_session *s = (spb_session *)vctx;
     destroy_connection(s);
+    spb_terminal_free(s);
     log_free(s->logctx);
     conf_free(s->conf);
+    spb_screen_free(s->screen);
 
     if (s->cb.released)
         s->cb.released(s->cb_ctx);
@@ -257,6 +273,8 @@ static void cmd_release(void *vctx)
 }
 
 /* ---------- Public API ---------- */
+
+static void post(spb_session *s, spb_command_fn fn, void *ctx);
 
 spb_session *spb_session_create(const spb_settings *settings,
                                 const spb_session_callbacks *callbacks,
@@ -290,9 +308,13 @@ spb_session *spb_session_create(const spb_settings *settings,
     s->conf = conf_new();
     spb_settings_load_into_conf(settings, s->conf);
     s->logctx = log_init(&s->logpolicy, s->conf);
+    s->screen = spb_screen_new();
 
     atomic_fetch_add(&spb_live_sessions, 1);
     atomic_fetch_add(&spb_open_sessions, 1);
+    /* The Terminal is built on the core thread, before anything else the
+     * caller can queue for this session. */
+    post(s, cmd_setup_terminal, s);
     return s;
 }
 
