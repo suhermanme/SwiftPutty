@@ -82,6 +82,11 @@ unchanged and the shell responsive (`echo` round-trip) after every step:
 
 ## Build matrix
 
-- Debug and Release, arm64 and x86_64 slices. The arm64 runtime pass needs
-  Apple Silicon hardware.
+- Debug and Release, arm64 and x86_64 slices.
+- CI (`.github/workflows/ci.yml`, GitHub Actions) runs
+  `scripts/test-all.sh --clean` on Apple Silicon (`macos-26`) and Intel
+  (`macos-26-intel`) runners with Xcode 26.6, on every push to `main`, every
+  pull request, and on demand. So each architecture's tests run natively,
+  including the sanitizer and leak passes. Failing checks appear as
+  annotations on the run; the full log is uploaded as an artifact.
 - Clean build at every milestone end.

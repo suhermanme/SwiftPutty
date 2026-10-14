@@ -90,6 +90,14 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4):
 | App Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
 | Manual run of the Debug app against a local Raw server (demo screen + shell on a PTY), screenshot-checked | 16/256/true colours, bold as colour, attributes, Cyrillic, CJK, emoji, combining, double-width/height lines, window title from OSC, window opens at 80×24, terminal fills the window |
 
+**CI** (added to complete M03): `.github/workflows/ci.yml` runs
+`scripts/test-all.sh --clean` on GitHub's Apple Silicon (`macos-26`) and
+Intel (`macos-26-intel`) runners with Xcode 26.6. The first run of the
+whole suite on arm64 hardware passed every C check (plain, `leaks`,
+ASan/UBSan, TSan); one Swift test failed on a timing assumption (below),
+and after the fix the arm64 job passed completely. This closes risk R-8:
+the arm64 slice is now executed, not just built.
+
 **Problems found and fixed during M03**
 
 - Paint-time re-entrancy: PuTTY calls `set_scrollbar` and other TermWin
@@ -110,6 +118,10 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4):
   counts on the core thread; the iteration test uses two barriers.
 - App: the terminal is resized when the session appears after layout;
   the terminal view takes keyboard focus when its window opens.
+- Found by the first arm64 CI run: a test assumed nothing comes between
+  a session's `remoteExit` and `CLOSED` events, but since M03 the
+  terminal's title update can (timing-dependent). The test now checks
+  session events only.
 
 **Limitations / not done**
 
@@ -126,7 +138,6 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4):
   bell options (wave file), blinking-text timing checks and printing.
 - No flow control between the main thread and the terminal beyond
   PuTTY's own backlog (M14).
-- arm64 slice built and linked; tests not run (x86_64 host).
 
 ## M02 — Session executor and event loop
 

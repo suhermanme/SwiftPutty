@@ -828,4 +828,4 @@ D-019). Differences from the §7 proposal:
 | R-5 | `TermWin` drawing on core thread vs AppKit on main | Frame snapshot design (§8); benchmark in M03/M14 |
 | R-6 | App Sandbox vs. listeners, serial, arbitrary key files, `SSH_AUTH_SOCK` | Evaluate in M15; developer builds unsandboxed |
 | R-7 | `pfl_closing` frees a listener that a `PortFwdRecord` still points to (if a listening socket ever reports closing) | Audit in M13 |
-| R-8 | arm64 slice cannot be executed on this x86_64 build host | Run the arm64 test pass on Apple Silicon hardware / CI before release |
+| R-8 | arm64 slice cannot be executed on the x86_64 development host | **Mitigated (M03):** CI (`.github/workflows/ci.yml`) runs the full `scripts/test-all.sh --clean` on Apple Silicon (`macos-26`) and Intel (`macos-26-intel`) runners for every push to `main` and every pull request |

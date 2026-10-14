@@ -1,5 +1,7 @@
 # SwiftPutty
 
+[![CI](https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml/badge.svg)](https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml)
+
 A native macOS (SwiftUI + AppKit) frontend for the **PuTTY 0.85** portable
 core. The goal is Windows `putty.exe` behaviour — SSH, terminal semantics,
 saved sessions, and especially **live "Change Settings…" on a running
@@ -30,6 +32,9 @@ scripts/build-app.sh           # core + universal Release app → build/DerivedD
 scripts/build-app.sh Debug
 scripts/test-all.sh [--clean]  # every automated check
 ```
+
+CI runs `scripts/test-all.sh --clean` on Apple Silicon and Intel runners
+for every push to `main` and every pull request (`.github/workflows/ci.yml`).
 
 To work in Xcode, run `scripts/build-core.sh` once (and again after changing
 `Core/` or `patches/`), then open `App/SwiftPutty.xcodeproj`. Swift-only
