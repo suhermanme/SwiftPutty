@@ -77,10 +77,19 @@ jobs:
       - name: Report failures
         if: failure() || cancelled()
         run: |
-          # Surface failing checks as annotations (readable without logs).
-          grep -E "CHECK failed|expected .* got|✘|error:|\*\*\*Failed|\*\*\*Timeout|ERROR: (Address|Thread)Sanitizer|WARNING: ThreadSanitizer|[1-9][0-9]* leaks for|^== |^==== " test-all.log \
-            | grep -v "spr_get_error_message" | tail -40 \
-            | while IFS= read -r line; do echo "::error::${line}"; done || true
+          # GitHub shows at most 10 annotations per step, so send two:
+          # the failure lines, and the end of the log (both readable
+          # through the API without downloading the log).
+          annotate() {  # title, text
+            local text="${2//'%'/'%25'}"
+            text="${text//$'\r'/}"
+            text="${text//$'\n'/'%0A'}"
+            echo "::error title=$1::${text}"
+          }
+          failures=$(grep -E "CHECK failed|expected .* got|✘|error:|Test +#.*(\*\*\*|Not Run)|ERROR:|SUMMARY:|WARNING: ThreadSanitizer|Assertion|[1-9][0-9]* leaks for" test-all.log \
+            | grep -v "spr_get_error_message" | head -60 || true)
+          annotate "Failures" "${failures:-(no failure lines matched)}"
+          annotate "End of log" "$(tail -80 test-all.log)"
 
       - name: Upload log
         if: always()
