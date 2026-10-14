@@ -311,8 +311,11 @@ static void sync_terminal(void)
     peer_write("\033[2K\033[H");
 }
 
-static void open_session(void)
+/* extra: NULL-terminated keyword/value pairs applied over the defaults. */
+static void open_session(const char *const *extra)
 {
+    WITH_EVENTS(ev.connected = false; ev.released = false;
+                ev.clip_writes = 0; ev.paste_requests = 0; ev.bells = 0);
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = { .sin_family = AF_INET,
                                 .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
@@ -333,6 +336,8 @@ static void open_session(void)
     spb_settings_set(s, "LocalEcho", "1");      /* force off */
     spb_settings_set(s, "LocalEdit", "1");      /* force off */
     spb_settings_set(s, "UTF8linedraw", "1");
+    for (; extra && *extra; extra += 2)
+        spb_settings_set(s, extra[0], extra[1]);
     char *err = NULL;
     session = spb_session_create(s, &callbacks, NULL, &err);
     spb_settings_free(s);
@@ -576,6 +581,12 @@ static void test_keys(void)
     EXPECT_SENT("Meta-x", "\033x");
     spb_session_text(session, "\003", 1, 0);
     EXPECT_SENT("Ctrl-C", "\003");
+
+    /* "Ctrl + Shift + {C,V}" is "No action" by default: they type. */
+    spb_session_key(session, SPB_KEY_C, SPB_MOD_CTRL | SPB_MOD_SHIFT);
+    EXPECT_SENT("Ctrl-Shift-C (no action)", "\003");
+    spb_session_key(session, SPB_KEY_V, SPB_MOD_CTRL | SPB_MOD_SHIFT | SPB_MOD_META);
+    EXPECT_SENT("Meta-Ctrl-Shift-V (no action)", "\033\026");
 }
 
 static void test_paste(void)
@@ -686,6 +697,88 @@ static void test_output_is_coalesced(void)
     CHECK(frames > 0 && frames < 2000);
 }
 
+static void test_close_and_release(void);
+
+/* ---------- A second session with non-default settings (M06) ---------- */
+
+static const char *const configured[] = {
+    "CtrlShiftCV", "explicit",
+    "CtrlShiftIns", "explicit",
+    "LinuxFunctionKeys", "1",          /* Linux */
+    "RXVTHomeEnd", "1",
+    "BackspaceIsDelete", "0",
+    "BlinkCur", "1",
+    NULL,
+};
+
+static bool pred_cursor_shown(const void *arg)
+{
+    bool want = *(const bool *)arg;
+    spb_cell *cell = cell_at(19, 9);
+    bool shown = cell->bg == 0x00FF00 && !(cell->flags & SPB_CELL_CURSOR);
+    return shown == want;
+}
+
+static void test_configured_session(void)
+{
+    open_session(configured);
+
+    /* Keyboard settings reach PuTTY's formatters. */
+    spb_session_key(session, SPB_KEY_F1, 0);
+    EXPECT_SENT("F1 (Linux)", "\033[[A");
+    spb_session_key(session, SPB_KEY_HOME, 0);
+    EXPECT_SENT("Home (rxvt)", "\033[H");
+    spb_session_key(session, SPB_KEY_END, 0);
+    EXPECT_SENT("End (rxvt)", "\033Ow");
+    spb_session_key(session, SPB_KEY_BACKSPACE, 0);
+    EXPECT_SENT("Backspace (^H)", "\010");
+
+    /* Ctrl+Shift+C copies the selection to the system clipboard. */
+    peer_write("\033[2J\033[1;1Hcopy this");
+    CHECK(wait_row(0, "copy this"));
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_CLICK, 0, 0, 0);
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_DRAG, 3, 0, 0);
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_RELEASE, 3, 0, 0);
+    CHECK(wait_events(clip_written, 10));
+    WITH_EVENTS(ev.clip_writes = 0);
+    spb_session_key(session, SPB_KEY_C, SPB_MOD_CTRL | SPB_MOD_SHIFT);
+    CHECK(wait_events(clip_written, 10));
+    pthread_mutex_lock(&ev.lock);
+    CHECK(ev.clip_which == SPB_CLIPBOARD_SYSTEM);
+    CHECK_STR(ev.clip_text, "copy");
+    ev.clip_writes = 0;
+    pthread_mutex_unlock(&ev.lock);
+
+    /* Ctrl+Insert does the same with "{Ctrl,Shift} + Ins" explicit. */
+    spb_session_key(session, SPB_KEY_INSERT, SPB_MOD_CTRL);
+    CHECK(wait_events(clip_written, 10));
+    pthread_mutex_lock(&ev.lock);
+    CHECK(ev.clip_which == SPB_CLIPBOARD_SYSTEM);
+    pthread_mutex_unlock(&ev.lock);
+
+    /* Ctrl+Shift+V and Shift+Insert paste from the system clipboard. */
+    spb_session_key(session, SPB_KEY_V, SPB_MOD_CTRL | SPB_MOD_SHIFT);
+    CHECK(wait_events(paste_requested, 10));
+    pthread_mutex_lock(&ev.lock);
+    CHECK(ev.paste_which == SPB_CLIPBOARD_SYSTEM);
+    ev.paste_requests = 0;
+    pthread_mutex_unlock(&ev.lock);
+    spb_session_key(session, SPB_KEY_INSERT, SPB_MOD_SHIFT);
+    CHECK(wait_events(paste_requested, 10));
+    pthread_mutex_lock(&ev.lock);
+    CHECK(ev.paste_which == SPB_CLIPBOARD_SYSTEM);
+    pthread_mutex_unlock(&ev.lock);
+
+    /* "Cursor blinks": PuTTY's terminal shows and hides the cursor. */
+    peer_write("\033[10;20H");
+    bool hidden = false, shown = true;
+    CHECK(wait_frame(pred_cursor_shown, &hidden, 5));
+    CHECK(wait_frame(pred_cursor_shown, &shown, 5));
+    CHECK(wait_frame(pred_cursor_shown, &hidden, 5));
+
+    test_close_and_release();
+}
+
 static void test_close_and_release(void)
 {
     close(peer);                                       /* remote end goes */
@@ -708,7 +801,7 @@ int main(void)
         return 2;
     }
 
-    open_session();
+    open_session(NULL);
     test_initial_frame();
     test_text_and_colours();
     test_unicode();
@@ -723,6 +816,7 @@ int main(void)
     test_mouse_reporting();
     test_output_is_coalesced();
     test_close_and_release();
+    test_configured_session();
 
     CHECK(spb_core_shutdown());
     free(cells);

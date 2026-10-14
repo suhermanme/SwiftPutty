@@ -493,3 +493,37 @@ frontend shows the destination as PuTTY uses it.
 **Consequences:** Logging works with PuTTY's default settings. A host
 key dialog and a log question can both be pending; the window shows them
 one after the other.
+
+## D-030 — Terminal parity: PuTTY's terminal does the work; macOS stands in for Windows window features
+
+**Status:** Accepted (M06); API v6
+**Context:** Most Terminal and Window settings are read by PuTTY's own
+terminal, line discipline and key formatters, so they work once they can
+be set. The rest are frontend work: GTK PuTTY's window code reads a known
+list (border, scrollbar side, pointer hiding, clipboard keys, title
+handling), and Windows PuTTY adds options with no Unix counterpart (bell
+sound file, taskbar flash, always on top, Alt-Enter).
+**Decision:**
+- The panels follow `config.c` plus `unix/config-gtk.c`'s Unix options
+  (scrollbar on left, UTF-8 override, the OS X Meta keys). The core is
+  built with upstream's `OSX_META_KEY_CONFIG` (only that part of
+  `OSX_GTK`), so `OSXOptionMeta` / `OSXCommandMeta` are saved and loaded
+  by `settings.c`, as in upstream's OS X build.
+- Frontend options are collected in `TerminalViewOptions` and handled as
+  GTK PuTTY handles them. Windows-only options with a macOS equivalent
+  are adapted: a custom bell sound plays with `NSSound` (beep if it
+  cannot); taskbar flashing becomes a Dock bounce (once, or until
+  activated) for a window in the background; always on top is a floating
+  window level; Alt-Enter becomes Option-Return.
+- Ctrl+Insert and Ctrl+Shift+C/V are decided in the bridge, as GTK's
+  `key_event` (new `SPB_KEY_C` / `SPB_KEY_V`): with "No action" they type
+  Ctrl-C / Ctrl-V. Clipboard choices use OS X PuTTY's names ("Last selected
+  text", "System clipboard"); X11 named clipboards are not offered.
+- The character set list is upstream's (`cp_enumerate`, exposed by the
+  bridge) without "Use font encoding", which has no meaning when every
+  font is drawn as Unicode.
+**Consequences:** Settings take effect through upstream code wherever
+upstream has it. Windows-only options with no macOS meaning (PC speaker,
+logical palettes, Windows mouse-button mode with its context menu, RTF
+copy, system colours, resize-by-font) stay out until a later milestone
+decides them.

@@ -25,6 +25,9 @@ public enum TerminalKey: Sendable, Hashable {
     case keypadMultiply, keypadDivide
     /// The Mac keypad's Clear key, which PuTTY treats as Num Lock.
     case keypadNumLock
+    /// The C and V keys with Control+Shift: copy and paste, or Ctrl-C and
+    /// Ctrl-V, per PuTTY's "Ctrl + Shift + {C,V}" setting.
+    case letterC, letterV
 
     var bridgeValue: spb_key {
         switch self {
@@ -54,6 +57,8 @@ public enum TerminalKey: Sendable, Hashable {
         case .keypadMultiply: SPB_KEY_KP_MULTIPLY
         case .keypadDivide: SPB_KEY_KP_DIVIDE
         case .keypadNumLock: SPB_KEY_KP_NUM_LOCK
+        case .letterC: SPB_KEY_C
+        case .letterV: SPB_KEY_V
         }
     }
 }

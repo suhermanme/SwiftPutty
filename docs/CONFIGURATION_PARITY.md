@@ -20,7 +20,7 @@ reconfigure handlers (`term_reconfig`, `ldisc_configure`, `log_reconfig`,
 - **unsupported** — no macOS equivalent.
 
 Every row was NOT STARTED at M00; M05 added the configuration dialog
-(D-028). COMPLETE rows are done; PARTIAL rows can be set before
+(D-028) and M06 the terminal and window panels. COMPLETE rows are done; PARTIAL rows can be set before
 connecting and take effect then, but cannot yet be changed in a running
 session (Change Settings, M07), or are otherwise limited as noted. For
 NOT STARTED rows, "macOS implementation" is the *planned* mapping.
@@ -67,43 +67,43 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Backspace key (`CONF_bksp_is_delete`) | Radio ^H / ^? | NOT STARTED | runtime | Read per keypress |
-| Home and End keys (`CONF_rxvt_homeend`) | Radio Standard/rxvt | NOT STARTED | runtime | |
-| Function keys and keypad (`CONF_funky_type`) | Popup ESC[n~ / Linux / Xterm R6 / VT400 / VT100+ / SCO / Xterm 216+ | NOT STARTED | runtime | Uses PuTTY `format_function_key` |
-| Shift/Ctrl/Alt with arrow keys (`CONF_sharrow_type`) | Radio | NOT STARTED | runtime | |
-| Initial state of cursor keys (`CONF_app_cursor`) | Radio | NOT STARTED | future | Takes effect at the next terminal power-on/reset |
-| Initial state of numeric keypad (`CONF_app_keypad`, `CONF_nethack_keypad`) | Radio Normal/Application/NetHack | NOT STARTED | future (app) / runtime (NetHack) | NetHack mode is read per key |
+| Backspace key (`CONF_bksp_is_delete`) | Radio Control-H / Control-? (127) | PARTIAL | runtime | Read per keypress. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Home and End keys (`CONF_rxvt_homeend`) | Radio Standard/rxvt | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Function keys and keypad (`CONF_funky_type`) | Radio ESC[n~ / Linux / Xterm R6 / VT400 / VT100+ / SCO / Xterm 216+ | PARTIAL | runtime | Uses PuTTY `format_function_key`. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Shift/Ctrl/Alt with arrow keys (`CONF_sharrow_type`) | Radio | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Initial state of cursor keys (`CONF_app_cursor`) | Radio | PARTIAL | future | Takes effect at the next terminal power-on/reset. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Initial state of numeric keypad (`CONF_app_keypad`, `CONF_nethack_keypad`) | Radio Normal/Application/NetHack | PARTIAL | future (app) / runtime (NetHack) | NetHack mode is read per key. One radio over two keywords (`numeric_keypad_handler`). M06: configuration dialog before connecting; live in Change Settings (M07). |
 | AltGr acts as Compose key (`CONF_compose_key`) | — | NOT APPLICABLE | unsupported | No AltGr on macOS; Option-key handling replaces it (below) |
 | Control-Alt is different from AltGr (`CONF_ctrlaltkeys`) | — | NOT APPLICABLE | unsupported | Same |
-| *(macOS addition)* Option acts as Meta (`CONF_osx_option_meta`) | Checkbox (left/right) | NOT STARTED | runtime | Upstream Unix-only key, already in `conf.h` |
-| *(macOS addition)* Command acts as Meta (`CONF_osx_command_meta`) | Checkbox | NOT STARTED | runtime | Upstream Unix-only key; conflicts with menu shortcuts, so default off |
+| *(macOS addition)* Option acts as Meta (`CONF_osx_option_meta`) | Checkbox "Option key acts as Meta" | PARTIAL | runtime | Upstream Unix-only key, already in `conf.h`. Saved via upstream `OSX_META_KEY_CONFIG` (D-030). M06: configuration dialog before connecting; live in Change Settings (M07). |
+| *(macOS addition)* Command acts as Meta (`CONF_osx_command_meta`) | Checkbox "Command key acts as Meta" | PARTIAL | runtime | Upstream Unix-only key; conflicts with menu shortcuts, so default off. Saved via upstream `OSX_META_KEY_CONFIG` (D-030). M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Terminal → Bell
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Action on bell (`CONF_beep`) | None / System alert (`NSSound.beep`) / Visual / Custom sound | NOT STARTED | runtime | Windows "Play a custom sound file" → `NSSound(contentsOf:)` |
-| Custom sound file (`CONF_bell_wavefile`) | File chooser (AIFF/WAV/CAF) | NOT STARTED | runtime | |
-| Taskbar/caption indication (`CONF_beep_ind`) | Dock bounce (`requestUserAttention`) / steady dock badge | NOT STARTED | runtime | Flashing → informational bounce, steady → critical bounce/badge |
-| Bell overload protection (`CONF_bellovl`, `_n`, `_t`, `_s`) | Checkbox + three fields | NOT STARTED | runtime | Implemented inside PuTTY's terminal |
+| Action on bell (`CONF_beep`) | Radio None / Default system alert (`NSSound.beep`) / Visual (flash) / Play a custom sound file | PARTIAL | runtime | Windows "Play a custom sound file" → `NSSound(contentsOf:)`. PC speaker (Windows) not offered; a saved value beeps. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Custom sound file (`CONF_bell_wavefile`) | Edit box + Browse… (NSOpenPanel, audio files); played with `NSSound` | PARTIAL | runtime | Beeps if the file cannot be played, as Windows PuTTY. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Taskbar/caption indication (`CONF_beep_ind`) | Radio "Dock indication on bell": Disabled / Bounce once / Bounce until activated | PARTIAL | runtime | Flashing → informational bounce, steady → critical bounce/badge. Windows Flashing / Steady → `requestUserAttention` informational / critical, only when the window is not active. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Bell overload protection (`CONF_bellovl`, `_n`, `_t`, `_s`) | Checkbox + count + two seconds fields (fixed point; saved in microseconds, as Unix settings.c) | PARTIAL | runtime | Implemented inside PuTTY's terminal. M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Terminal → Features
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Disable application cursor keys (`CONF_no_applic_c`) | Checkbox | NOT STARTED | runtime | |
-| Disable application keypad (`CONF_no_applic_k`) | Checkbox | NOT STARTED | runtime | |
-| Disable xterm mouse reporting (`CONF_no_mouse_rep`) | Checkbox | NOT STARTED | runtime | `term_reconfig` drops raw mouse mode |
-| Disable remote resizing (`CONF_no_remote_resize`) | Checkbox | NOT STARTED | runtime | |
-| Disable alternate screen (`CONF_no_alt_screen`) | Checkbox | NOT STARTED | runtime | `term_reconfig` swaps back immediately |
-| Disable remote window title changing (`CONF_no_remote_wintitle`) | Checkbox | NOT STARTED | runtime | |
-| Response to remote title query (`CONF_remote_qtitle_action`) | Radio None/Empty string/Window title | NOT STARTED | runtime | Security-relevant; keep upstream default |
-| Disable remote clearing of scrollback (`CONF_no_remote_clearscroll`) | Checkbox | NOT STARTED | runtime | |
-| Disable destructive backspace (`CONF_no_dbackspace`) | Checkbox | NOT STARTED | runtime | |
-| Disable remote charset config (`CONF_no_remote_charset`) | Checkbox | NOT STARTED | runtime | |
-| Disable Arabic shaping (`CONF_no_arabicshaping`) | Checkbox | NOT STARTED | runtime | Flushes bidi cache |
-| Disable bidi (`CONF_no_bidi`) | Checkbox | NOT STARTED | runtime | |
-| Disable bracketed paste (`CONF_no_bracketed_paste`) | Checkbox | NOT STARTED | runtime | |
+| Disable application cursor keys (`CONF_no_applic_c`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable application keypad (`CONF_no_applic_k`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable xterm mouse reporting (`CONF_no_mouse_rep`) | Checkbox | PARTIAL | runtime | `term_reconfig` drops raw mouse mode. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable remote resizing (`CONF_no_remote_resize`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable alternate screen (`CONF_no_alt_screen`) | Checkbox | PARTIAL | runtime | `term_reconfig` swaps back immediately. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable remote window title changing (`CONF_no_remote_wintitle`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Response to remote title query (`CONF_remote_qtitle_action`) | Radio None/Empty string/Window title | PARTIAL | runtime | Security-relevant; keep upstream default. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable remote clearing of scrollback (`CONF_no_remote_clearscroll`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable destructive backspace (`CONF_no_dbackspace`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable remote charset config (`CONF_no_remote_charset`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable Arabic shaping (`CONF_no_arabicshaping`) | Checkbox | PARTIAL | runtime | Flushes bidi cache. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable bidi (`CONF_no_bidi`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable bracketed paste (`CONF_no_bracketed_paste`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Window
 
@@ -113,6 +113,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | When window is resized (`CONF_resize_action`) | Radio: change rows/cols, change font size, both, forbid | NOT STARTED | runtime | |
 | Lines of scrollback (`CONF_savelines`) | Number field | PARTIAL | runtime | `term_size`. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Display scrollbar (`CONF_scrollbar`) | Checkbox (NSScroller visibility) | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| *(Unix/GTK)* Scrollbar on left (`CONF_scrollbar_on_left`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Display scrollbar in full screen (`CONF_scrollbar_in_fullscreen`) | Checkbox | NOT STARTED | runtime | macOS full-screen space |
 | Reset scrollback on keypress (`CONF_scroll_on_key`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Reset scrollback on display activity (`CONF_scroll_on_disp`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
@@ -123,12 +124,12 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Cursor appearance (`CONF_cursor_type`) | Radio Block/Underline/Vertical line | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
-| Cursor blinks (`CONF_blink_cur`) | Checkbox | NOT STARTED | runtime | |
+| Cursor blinks (`CONF_blink_cur`) | Checkbox | PARTIAL | runtime | Blinking is done by PuTTY's terminal. M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Font (`CONF_font`) | Font description + Change… popover: fixed-pitch family and size; stored as `"<PostScriptName> <pt>"` | PARTIAL | runtime | Unix FontSpec is a string; we store `"<PostScriptName> <pt>"`. Default `Menlo-Regular 12` (Windows: Courier New 10), set in M01. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Allow variable-pitch fonts | Checkbox (font panel filter) | NOT STARTED | runtime | UI-only in Windows too |
 | Font quality (`CONF_font_quality`) | — | NOT APPLICABLE | unsupported | ClearType/antialias options; macOS always antialiases. Kept in the model for round-trip |
-| Hide mouse pointer when typing (`CONF_hide_mouseptr`) | Checkbox (`NSCursor.setHiddenUntilMouseMoves`) | NOT STARTED | runtime | |
-| Gap between text and window edge (`CONF_window_border`) | Number field | NOT STARTED | runtime | |
+| Hide mouse pointer when typing (`CONF_hide_mouseptr`) | Checkbox (`NSCursor.setHiddenUntilMouseMoves`) | PARTIAL | runtime | Before M06 the pointer was always hidden while typing. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Gap between text and window edge (`CONF_window_border`) | Number field | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Sunken-edge border (`CONF_sunken_edge`) | — | NOT APPLICABLE | unsupported | Win32 window style |
 | *(Unix/GTK)* Bold/wide/wide-bold fonts, shadow bold (`CONF_boldfont`, `CONF_widefont`, `CONF_wideboldfont`, `CONF_shadowbold`, `CONF_shadowboldoffset`) | Optional advanced font section | NOT STARTED | runtime | Not in Windows UI; keys exist in `conf.h` |
 
@@ -137,48 +138,49 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Window title (`CONF_wintitle`) | Text field | PARTIAL | runtime | `term_pre_reconfig` pre-fills the live title. M05: configuration dialog before connecting; live in Change Settings (M07). |
-| Separate window and icon titles (`CONF_win_name_always`) | Checkbox (icon title → miniaturised title) | NOT STARTED | runtime | |
+| Separate window and icon titles (`CONF_win_name_always`) | Checkbox "Separate window and icon titles" (inverted): the minimised window shows the icon title | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Warn before closing window (`CONF_warn_on_close`) | Checkbox (close confirmation sheet) | NOT STARTED | runtime | |
 | Window closes on ALT-F4 (`CONF_alt_f4`) | — | NOT APPLICABLE | unsupported | ⌘W is standard |
 | System menu on ALT-Space / ALT alone (`CONF_alt_space`, `CONF_alt_only`) | — | NOT APPLICABLE | unsupported | No system menu on macOS |
-| Ensure window is always on top (`CONF_alwaysontop`) | Checkbox (`NSWindow.level = .floating`) | NOT STARTED | runtime | |
-| Full screen on Alt-Enter (`CONF_fullscreenonaltenter`) | Checkbox (Option-Return → toggleFullScreen) | NOT STARTED | runtime | ⌃⌘F always available |
+| Ensure window is always on top (`CONF_alwaysontop`) | Checkbox (`NSWindow.level = .floating`) | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Full screen on Alt-Enter (`CONF_fullscreenonaltenter`) | Checkbox "Full screen on Option-Return" (`toggleFullScreen`) | PARTIAL | runtime | ⌃⌘F always available. M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Window → Translation
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Remote character set (`CONF_line_codepage`) | Popup of PuTTY charset names (UTF-8 default) | NOT STARTED | runtime | Upstream `charset/` |
-| Treat CJK ambiguous as wide (`CONF_cjk_ambig_wide`) | Checkbox | NOT STARTED | runtime | |
+| Remote character set (`CONF_line_codepage`) | Popup of PuTTY's charset names (`cp_enumerate`, API v6); shows the canonical name | PARTIAL | runtime | Upstream `charset/`. "Use font encoding" not listed: SwiftPutty draws Unicode only. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| *(Unix/GTK)* Override with UTF-8 if locale says so (`CONF_utf8_override`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Treat CJK ambiguous as wide (`CONF_cjk_ambig_wide`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Caps Lock acts as Cyrillic switch (`CONF_xlat_capslockcyr`) | — | NOT APPLICABLE | unsupported | macOS input sources replace it |
-| Line drawing handling (`CONF_vtmode`) | Radio (Unicode / poor man's / font has XWindows encoding…) — subset meaningful on macOS | NOT STARTED | runtime | Windows-specific modes (ANSI/OEM font) are NOT APPLICABLE |
-| Copy and paste line drawing as lqqqk (`CONF_rawcnp`) | Checkbox | NOT STARTED | runtime | |
-| Enable VT100 line drawing in UTF-8 (`CONF_utf8linedraw`) | Checkbox | NOT STARTED | runtime | |
+| Line drawing handling (`CONF_vtmode`) | Radio: Unicode line drawing / Poor man's (+, - and |), as Unix PuTTY | PARTIAL | runtime | Windows-specific modes (ANSI/OEM font) are NOT APPLICABLE. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Copy and paste line drawing as lqqqk (`CONF_rawcnp`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Enable VT100 line drawing in UTF-8 (`CONF_utf8linedraw`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Window → Selection (+ Copy)
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Action of mouse buttons (`CONF_mouse_is_xterm`) | Radio: Windows / Compromise / xterm | NOT STARTED | runtime | Right-click context menu vs paste follows this, as in Windows |
-| Shift overrides application's mouse (`CONF_mouse_override`) | Checkbox | NOT STARTED | runtime | |
-| Default selection mode (`CONF_rect_select`) | Radio Normal/Rectangular (Option-drag = other) | NOT STARTED | runtime | Windows uses Alt-drag |
-| Auto-copy selected text (`CONF_mouseautocopy`) | Checkbox | NOT STARTED | runtime | |
-| Mouse paste / Ctrl+Ins / Ctrl+Shift+C,V clipboards (`CONF_mousepaste`, `CONF_ctrlshiftins`, `CONF_ctrlshiftcv` + `_custom`) | Mapped to NSPasteboard general / "selection" (app-private) | NOT STARTED | runtime | ⌘C/⌘V always use the general pasteboard |
-| Permit control characters in paste (`CONF_paste_controls`) | Checkbox | NOT STARTED | runtime | |
+| Shift overrides application's mouse (`CONF_mouse_override`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Default selection mode (`CONF_rect_select`) | Radio Normal/Rectangular (Option-drag = other) | PARTIAL | runtime | Windows uses Alt-drag. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Auto-copy selected text (`CONF_mouseautocopy`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Mouse paste / Ctrl+Ins / Ctrl+Shift+C,V clipboards (`CONF_mousepaste`, `CONF_ctrlshiftins`, `CONF_ctrlshiftcv` + `_custom`) | Popups: No action / Last selected text / System clipboard (OS X names); Ctrl+Insert copy and Ctrl+Shift+C/V in the bridge (API v6) | PARTIAL | runtime | ⌘C/⌘V always use the general pasteboard. Named (custom) clipboards are X11-only and act as No action. ⌘C/⌘V always use the general pasteboard. M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Permit control characters in paste (`CONF_paste_controls`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Copy as RTF (`CONF_rtf_paste`) | Checkbox (writes `.rtf` pasteboard type too) | NOT STARTED | runtime | |
-| Character classes (`CONF_wordness`) | Table editor | NOT STARTED | runtime | `term_reconfig` resets classes |
+| Character classes (`CONF_wordness`) | Selection/Copy panel: table of characters 0–127 + "Set to class" | PARTIAL | runtime | `term_reconfig` resets classes. M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Window → Colours
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Allow ANSI colours (`CONF_ansi_colour`) | Checkbox | NOT STARTED | runtime | |
-| Allow xterm 256-colour (`CONF_xterm_256_colour`) | Checkbox | NOT STARTED | runtime | |
-| Allow 24-bit colour (`CONF_true_colour`) | Checkbox | NOT STARTED | runtime | |
-| Indicate bold by (`CONF_bold_style`) | Radio font / colour / both | NOT STARTED | runtime | |
+| Allow ANSI colours (`CONF_ansi_colour`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Allow xterm 256-colour (`CONF_xterm_256_colour`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Allow 24-bit colour (`CONF_true_colour`) | Checkbox | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
+| Indicate bold by (`CONF_bold_style`) | Radio font / colour / both | PARTIAL | runtime | M06: configuration dialog before connecting; live in Change Settings (M07). |
 | Attempt to use logical palettes (`CONF_try_palette`) | — | NOT APPLICABLE | unsupported | 256-colour display mode concept |
 | Use system colours (`CONF_system_colour`) | Checkbox (NSColor.textColor/textBackgroundColor, follows dark mode) | NOT STARTED | runtime | `term_notify_palette_changed` |
-| Colour list + RGB (`CONF_colours`) | Table + NSColorWell | NOT STARTED | runtime | `term_reconfig` updates the palette unless overridden by OSC |
+| Colour list + RGB (`CONF_colours`) | List with swatches + Red/Green/Blue fields + Modify… (ColorPicker) | PARTIAL | runtime | `term_reconfig` updates the palette unless overridden by OSC. Components clamped to 0–255, as `colour_handler`. M06: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Connection
 
@@ -300,10 +302,11 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 These keys are kept in the model for round-trip fidelity (D-004):
 `CONF_remote_cmd2`, `CONF_ssh_subsys`, `CONF_ssh_subsys2`, `CONF_ssh_nc_host`,
 `CONF_ssh_nc_port`, `CONF_ssh_simple`, `CONF_stamp_utmp`, `CONF_login_shell`,
-`CONF_scrollbar_on_left`, `CONF_winclass`, `CONF_utf8_override`,
-`CONF_sshbug_*` not exposed in the UI, `CONF_tcp_*` (shown above). Most are
-`NOT_SAVED` or used only by plink/pterm. Their status is NOT APPLICABLE
-unless a later milestone needs them.
+`CONF_winclass`, `CONF_sshbug_*` not exposed in the UI, `CONF_tcp_*` (shown
+above). Most are `NOT_SAVED` or used only by plink/pterm. Their status is
+NOT APPLICABLE unless a later milestone needs them. GTK PuTTY's own
+options (`CONF_scrollbar_on_left`, `CONF_utf8_override`, the Meta keys)
+are in the tables above since M06.
 
 ## Process for keeping this complete
 

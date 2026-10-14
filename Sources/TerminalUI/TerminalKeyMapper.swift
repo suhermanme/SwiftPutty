@@ -59,6 +59,12 @@ public enum TerminalKeyMapper {
         if let key = keys[keyCode] {
             return .key(key, modifiers)
         }
+        // Ctrl+Shift+C/V: PuTTY decides between the clipboard and Ctrl-C/V.
+        if flags.contains(.control), flags.contains(.shift),
+           let base = (charactersIgnoringModifiers ?? characters)?.lowercased(),
+           base == "c" || base == "v" {
+            return .key(base == "c" ? .letterC : .letterV, modifiers)
+        }
         if flags.contains(.control),
            let base = charactersIgnoringModifiers ?? characters,
            let code = controlCode(for: base) {

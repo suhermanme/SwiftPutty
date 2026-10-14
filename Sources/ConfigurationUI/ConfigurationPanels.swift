@@ -220,6 +220,7 @@ struct WindowPanel: View {
             SettingsGroup(title: "Control the scrollback in the window") {
                 NumberSetting(model: model, label: "Lines of scrollback", keyword: .scrollbackLines)
                 CheckboxSetting(model: model, label: "Display scrollbar", keyword: .scrollBar)
+                CheckboxSetting(model: model, label: "Scrollbar on left", keyword: .scrollbarOnLeft)
                 CheckboxSetting(model: model, label: "Reset scrollback on keypress", keyword: .scrollOnKey)
                 CheckboxSetting(model: model, label: "Reset scrollback on display activity",
                                 keyword: .scrollOnDisp)
@@ -241,6 +242,7 @@ struct AppearancePanel: View {
             SettingsGroup(title: "Adjust the use of the cursor") {
                 RadioSetting(model: model, label: "Cursor appearance:", keyword: .curType,
                              options: [("Block", "0"), ("Underline", "1"), ("Vertical line", "2")])
+                CheckboxSetting(model: model, label: "Cursor blinks", keyword: .blinkCur)
             }
             SettingsGroup(title: "Font settings") {
                 Text("Font used in the terminal window")
@@ -253,6 +255,14 @@ struct AppearancePanel: View {
                                                           set: { model.setString(.fontName, $0) }))
                         }
                 }
+            }
+            SettingsGroup(title: "Adjust the use of the mouse pointer") {
+                CheckboxSetting(model: model, label: "Hide mouse pointer when typing in window",
+                                keyword: .hideMousePtr)
+            }
+            SettingsGroup(title: "Adjust the window border") {
+                NumberSetting(model: model, label: "Gap between text and window edge:",
+                              keyword: .windowBorder)
             }
         }
     }
@@ -313,8 +323,19 @@ struct BehaviourPanel: View {
     let model: ConfigurationModel
 
     var body: some View {
-        SettingsGroup(title: "Adjust the behaviour of the window title") {
-            TextSetting(model: model, label: "Window title:", keyword: .winTitle)
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsGroup(title: "Adjust the behaviour of the window title") {
+                TextSetting(model: model, label: "Window title:", keyword: .winTitle)
+                // CHECKBOX_INVERT: ticked means WinNameAlways off.
+                Toggle("Separate window and icon titles",
+                       isOn: Binding(get: { !model.bool(.winNameAlways) },
+                                     set: { model.setBool(.winNameAlways, !$0) }))
+            }
+            SettingsGroup(title: nil) {
+                CheckboxSetting(model: model, label: "Ensure window is always on top", keyword: .alwaysOnTop)
+                CheckboxSetting(model: model, label: "Full screen on Option-Return",
+                                keyword: .fullScreenOnAltEnter)
+            }
         }
     }
 }
@@ -339,9 +360,8 @@ struct ConnectionPanel: View {
                                 keyword: .tcpKeepalives)
             }
             SettingsGroup(title: "Internet protocol version") {
-                RadioSetting(model: model, label: "Internet protocol version", keyword: .addressFamily,
+                RadioSetting(model: model, label: "", keyword: .addressFamily,
                              options: [("Auto", "0"), ("IPv4", "1"), ("IPv6", "2")])
-                    .labelsHidden()
             }
             SettingsGroup(title: "Logical name of remote host") {
                 TextSetting(model: model, label: "Logical name of remote host (e.g. for SSH key lookup):",

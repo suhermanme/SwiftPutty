@@ -5,6 +5,7 @@
  */
 
 #include <pthread.h>
+#include <limits.h>
 #include <string.h>
 
 #include "spb_internal.h"
@@ -172,6 +173,17 @@ void spb_settings_prepare_session(spb_settings *settings)
     prepare_session(conf);
     spb_settings_save_from_conf(settings, conf);
     conf_free(conf);
+}
+
+const char *spb_charset_name(size_t index)
+{
+    return index > INT_MAX ? NULL : cp_enumerate((int)index);
+}
+
+/* config.c codepage_handler */
+const char *spb_charset_canonical_name(const char *line_codepage)
+{
+    return cp_name(decode_codepage(line_codepage ? line_codepage : ""));
 }
 
 void spb_settings_normalise(spb_settings *settings)

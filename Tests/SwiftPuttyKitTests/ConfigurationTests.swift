@@ -221,6 +221,66 @@ struct ConfigurationTests {
         #expect(try storage.contents() == "damaged")
     }
 
+    @Test func numericKeypadIsOneRadioOverTwoKeywords() {
+        let f = Fixture()
+        #expect(f.model.numericKeypadMode == 0)
+        f.model.numericKeypadMode = 2
+        #expect(f.model.settings["NetHackKeypad"] == "1" && f.model.settings["ApplicationKeypad"] == "0")
+        f.model.numericKeypadMode = 1
+        #expect(f.model.settings["NetHackKeypad"] == "0" && f.model.settings["ApplicationKeypad"] == "1")
+        #expect(f.model.numericKeypadMode == 1)
+    }
+
+    @Test func coloursAreRGBTriplesClampedLikePuTTY() {
+        let f = Fixture()
+        #expect(ConfigurationModel.colourNames.count == 22)
+        #expect(f.model.colour(0) == (187, 187, 187))             // Default Foreground
+        #expect(f.model.colour(5) == (0, 255, 0))                 // Cursor Colour
+        f.model.setColour(8, red: 300, green: -5, blue: 17)
+        #expect(f.model.settings["Colour8"] == "255,0,17")
+        #expect(f.model.settings.normalised()["Colour8"] == "255,0,17")
+    }
+
+    @Test func characterClassesAreSetInGroupsOf32() {
+        let f = Fixture()
+        #expect(f.model.characterClass(Int(UInt8(ascii: "a"))) == 2)
+        #expect(f.model.characterClass(Int(UInt8(ascii: " "))) == 0)
+        f.model.setCharacterClass([45, 46, 47], to: "2")           // - . /
+        #expect(f.model.characterClass(46) == 2)
+        #expect(f.model.settings["Wordness32"]?.split(separator: ",").count == 32)
+        let normalised = f.model.settings.normalised()
+        #expect(normalised["Wordness32"] == f.model.settings["Wordness32"])
+    }
+
+    @Test func bellOverloadTimesAreMicrosecondsShownAsSeconds() {
+        let f = Fixture()
+        #expect(f.model.seconds(.bellOverloadT) == "2")
+        f.model.setSeconds(.bellOverloadT, "2.5")
+        #expect(f.model.settings["BellOverloadT"] == "2500000")
+        #expect(f.model.seconds(.bellOverloadT) == "2.5")
+        #expect(f.model.settings.normalised()["BellOverloadT"] == "2500000")
+        #expect(ConfigurationModel.formatFixedPoint(1_250, denominator: 1_000_000) == "0.00125")
+        #expect(ConfigurationModel.parseFixedPoint("x", denominator: 1_000_000) == 0)
+    }
+
+    @Test func metaKeySettingsAreSaved() throws {
+        // Upstream saves these only with OSX_META_KEY_CONFIG (unix/platform.h).
+        let f = Fixture()
+        f.model.setBool(.osxOptionMeta, false)
+        f.model.setBool(.osxCommandMeta, true)
+        f.model.setSavedSessionName("meta")
+        f.model.save()
+        let loaded = try f.storage.store.load("meta").settings
+        #expect(loaded["OSXOptionMeta"] == "0" && loaded["OSXCommandMeta"] == "1")
+    }
+
+    @Test func characterSetsArePuTTYs() {
+        #expect(PuTTYSettings.characterSets.first == "UTF-8")
+        #expect(PuTTYSettings.characterSets.contains("ISO-8859-15"))
+        #expect(PuTTYSettings.canonicalCharacterSet("") == "UTF-8")
+        #expect(PuTTYSettings.canonicalCharacterSet("KOI8-R") == "KOI8-R")
+    }
+
     @Test func atoiIsCs() {
         #expect(ConfigurationModel.atoi("") == 0)
         #expect(ConfigurationModel.atoi(" 42abc") == 42)

@@ -104,6 +104,8 @@ static void send_keypad(spb_session *s, char key, uint32_t mods)
     }
 }
 
+/* Named ("custom") clipboards are an X11 feature; macOS has none, so
+ * such settings act as "No action". */
 static bool request_shift_insert_paste(spb_session *s)
 {
     switch (conf_get_int(s->conf, CONF_ctrlshiftins)) {
@@ -112,6 +114,42 @@ static bool request_shift_insert_paste(spb_session *s)
         return true;
       case CLIPUI_EXPLICIT:
         term_request_paste(s->term, CLIP_CLIPBOARD);
+        return true;
+      default:
+        return false;
+    }
+}
+
+static bool request_ctrl_insert_copy(spb_session *s)
+{
+    static const int clips_clipboard[] = { CLIP_CLIPBOARD };
+    switch (conf_get_int(s->conf, CONF_ctrlshiftins)) {
+      case CLIPUI_IMPLICIT:
+        return true;          /* re-copying to the selection is not needed */
+      case CLIPUI_EXPLICIT:
+        term_request_copy(s->term, clips_clipboard, lenof(clips_clipboard));
+        return true;
+      default:
+        return false;
+    }
+}
+
+/* Ctrl+Shift+C / Ctrl+Shift+V. Returns false for "No action": then
+ * the keys type Ctrl-C / Ctrl-V. */
+static bool ctrl_shift_cv(spb_session *s, bool paste)
+{
+    static const int clips_clipboard[] = { CLIP_CLIPBOARD };
+    switch (conf_get_int(s->conf, CONF_ctrlshiftcv)) {
+      case CLIPUI_IMPLICIT:
+        if (paste)
+            term_request_paste(s->term, CLIP_PRIMARY);
+        return true;
+      case CLIPUI_EXPLICIT:
+        if (paste)
+            term_request_paste(s->term, CLIP_CLIPBOARD);
+        else
+            term_request_copy(s->term, clips_clipboard,
+                              lenof(clips_clipboard));
         return true;
       default:
         return false;
@@ -148,6 +186,11 @@ void spb_input_key(spb_session *s, spb_key key, uint32_t mods)
         }
     }
     if (key == SPB_KEY_INSERT && shift && request_shift_insert_paste(s))
+        return;
+    if (key == SPB_KEY_INSERT && ctrl && request_ctrl_insert_copy(s))
+        return;
+    if ((key == SPB_KEY_C || key == SPB_KEY_V) && ctrl && shift &&
+        ctrl_shift_cv(s, key == SPB_KEY_V))
         return;
 
     if (!can_type(s))
@@ -202,6 +245,12 @@ void spb_input_key(spb_session *s, spb_key key, uint32_t mods)
         break;
       case SPB_KEY_ESCAPE:
         *p = '\033';
+        n = 1;
+        break;
+      case SPB_KEY_C:
+      case SPB_KEY_V:
+        /* Not claimed for the clipboard: an ordinary Ctrl-C / Ctrl-V. */
+        *p = key == SPB_KEY_C ? '\x03' : '\x16';
         n = 1;
         break;
       case SPB_KEY_KP_NUM_LOCK: send_keypad(s, 'G', mods); return;

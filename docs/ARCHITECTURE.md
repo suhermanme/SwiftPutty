@@ -841,6 +841,12 @@ session, kept until release; and `spb_settings_prepare_session`
 GTK PuTTY's `new_session_window` does. Saved sessions stay on the Swift
 side (D-027); the core still never opens a session by name.
 
+M06 (API v6, D-030) adds `SPB_KEY_C` / `SPB_KEY_V` (Ctrl+Shift+C/V,
+decided by the bridge per `CONF_ctrlshiftcv`, as GTK's `key_event`),
+Ctrl+Insert copy, and `spb_charset_name` / `spb_charset_canonical_name`
+(upstream's character set list). The core is compiled with
+`OSX_META_KEY_CONFIG`, so the Meta-key settings are saved.
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |

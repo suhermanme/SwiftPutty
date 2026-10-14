@@ -8,7 +8,7 @@
 | **M03** | Terminal rendering foundation | **COMPLETE** (2026-10-14) |
 | **M04** | Basic SSH session | **COMPLETE** (2026-10-14) |
 | **M05** | Saved sessions and PuTTY config UI | **COMPLETE** (2026-10-15) |
-| M06 | Terminal parity | NOT STARTED |
+| **M06** | Terminal parity | **COMPLETE** (2026-10-15) |
 | M07 | Live session reconfiguration framework | NOT STARTED |
 | M08 | SSH tunnels + live tunnel reconfiguration | NOT STARTED |
 | M09 | SSH authentication and connection parity | NOT STARTED |
@@ -20,6 +20,90 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M06 — Terminal parity
+
+**Delivered**
+
+- **Configuration panels** (D-030): Terminal/Keyboard (Backspace, Home/End,
+  function key type, Shift/Ctrl/Alt arrows, initial cursor and numeric
+  keypad state, Option/Command as Meta), Terminal/Bell (action, custom
+  sound file, Dock indication, overload protection), Terminal/Features (all
+  thirteen), Window/Translation (PuTTY's character sets, UTF-8 override,
+  CJK ambiguous width, line drawing), Window/Selection (Shift override,
+  selection mode, auto-copy, mouse paste / {Ctrl,Shift}+Ins /
+  Ctrl+Shift+{C,V} clipboards, control characters in paste),
+  Window/Selection/Copy (character classes), Window/Colours (ANSI, 256 and
+  24-bit colour, bold style, the 22 colours); and in existing panels:
+  cursor blinks, hide pointer when typing, gap to the window edge,
+  scrollbar on left, separate window and icon titles, always on top, full
+  screen on Option-Return. Everything the terminal, line discipline and
+  key formatters read takes effect through upstream code.
+- **Frontend behaviour** (`TerminalViewOptions`): window border and
+  scrollbar side; pointer hidden while typing only when configured (it was
+  always hidden before); custom bell sound via `NSSound`, beeping if the
+  file cannot be played; Dock bounce for a bell in a background window;
+  floating window level; Option-Return full screen; icon title as the
+  minimised window's title.
+- **Bridge API v6**: Ctrl+Insert copy and Ctrl+Shift+C/V decided in C per
+  the settings (`SPB_KEY_C` / `SPB_KEY_V`; "No action" types ^C / ^V, as
+  GTK's `key_event`); the character set list and canonical names. The
+  core is built with upstream's `OSX_META_KEY_CONFIG`, so the Meta-key
+  settings are saved (they were dropped by every save before).
+- The configuration window is taller (15 categories); radio groups put
+  their label above the buttons, as PuTTY lays them out.
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| C tests (`spb_bridge_test` adds character sets; `spb_terminal_test` adds Ctrl+Shift+C/V defaults and a second session: Linux function keys, rxvt Home/End, ^H Backspace, Ctrl+Shift+C / Ctrl+Insert copy, Ctrl+Shift+V / Shift+Insert paste from the system clipboard, cursor blink) | Passed |
+| `leaks --atExit`: all four C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan / TSan (Debug) | Passed, no reports |
+| `swift test` (85 tests, 16 suites; new: view options and geometry, Ctrl+Shift+C/V mapping, keypad radio, colours, character classes, bell overload times, Meta keys saved, character sets) | 85/85 passed |
+| `swift test --sanitize=address` / `--sanitize=thread` | 85/85 passed, no reports |
+| App Debug build; Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
+| Every panel rendered offscreen in a real `NSWindow` and inspected; the M05 dialog also checked in the running app | Fixed during M06: squeezed radio groups, category tree taller than the window |
+
+**Manual interoperability check** against the LAN OpenSSH 10.2p1
+(Ubuntu) server, through the bridge API as the app uses it, with
+non-default settings (all passed): host box ` test_user@host ` split into
+host and user name (`prepare_session`); unknown host key dialog; password
+prompt in the terminal; the log file question ("SwiftPutty Log to File")
+answered Append, and the log appended to the existing file;
+`TERM=xterm-256color` and the user name seen by the server; Linux F1 and
+rxvt Home/End reaching the server as `^[[[A^[[H^[Ow` (`cat -v`); a
+selection copied by Ctrl+Shift+C to the system clipboard; the cursor
+blinking; remote character set ISO-8859-1 showing UTF-8 `é` as `Ã©` with
+"Override with UTF-8 if locale says so" off (with it on, a UTF-8 locale
+keeps UTF-8, as upstream); `exit 3` reported as exit status 3.
+
+**Problems found and fixed during M06**
+
+- `OSXOptionMeta` / `OSXCommandMeta` were not PuTTY keywords in this build
+  (upstream saves them only with `OSX_META_KEY_CONFIG`), so normalised
+  saves dropped them.
+- The mouse pointer was hidden on every keypress, against PuTTY's default.
+- Ctrl+Shift+C/V reached the bridge as plain ^C/^V, so the clipboard
+  settings could not apply; Ctrl+Insert never copied.
+- Charset names on Unix are plain ("ISO-8859-1"), not Windows' long
+  names; the first test assumed the latter.
+
+**Limitations / not done**
+
+- Not exercised by hand in the running app: the bell sound and Dock
+  bounce, Option-Return, always-on-top, the colour picker, the character
+  class table (logic and layout are tested; the terminal-side behaviour
+  was checked against the LAN server through the bridge, above).
+- Not offered: GTK's Window/Fonts panel (separate bold and wide fonts,
+  shadow bold), "When window is resized" (font-size resizing), scrollbar
+  in full screen, "Allow variable-pitch fonts", Windows' mouse-button mode
+  (its right-click menu), RTF copy, system colours, PC speaker, printing
+  (the printer is still stubbed). Warn before closing is M10.
+- Settings apply when a session starts; changing them in a running
+  session is M07.
 
 ## M05 — Saved sessions and PuTTY config UI
 

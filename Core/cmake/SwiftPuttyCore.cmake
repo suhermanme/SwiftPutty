@@ -126,6 +126,10 @@ function(swiftputty_define_core)
     $<TARGET_OBJECTS:swiftputty-be-list>
     $<TARGET_OBJECTS:swiftputty-unix-storage>
     ${upstream_objects})
+  # As upstream's OS X GTK build (unix/platform.h, OSX_GTK): save and load
+  # the "Option/Command key acts as Meta" settings. Only settings.c uses
+  # it here; the rest of OSX_GTK (GTK and clipboard tweaks) does not apply.
+  target_compile_definitions(swiftputty-core PRIVATE OSX_META_KEY_CONFIG)
   target_include_directories(swiftputty-core PUBLIC ${B}/include)
   target_include_directories(swiftputty-core PRIVATE ${B}/src)
   add_dependencies(swiftputty-core generated_licence_h cmake_commit_c)

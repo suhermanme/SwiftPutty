@@ -11,6 +11,52 @@ public enum TerminalSelectionBuffer {
     public static var text = ""
 }
 
+/// What the terminal view takes from a session's settings: the options
+/// that GTK PuTTY's window code (unix/window.c), not the terminal, acts
+/// on, plus the Windows window options that have a macOS counterpart.
+public struct TerminalViewOptions: Equatable, Sendable {
+    public var fontName: String?
+    public var showsScrollbar: Bool
+    /// GTK PuTTY's "Scrollbar on left".
+    public var scrollbarOnLeft: Bool
+    /// "Gap between text and window edge", in points.
+    public var border: CGFloat
+    public var optionIsMeta: Bool
+    public var commandIsMeta: Bool
+    /// "Hide mouse pointer when typing in window".
+    public var hidesMousePointerWhenTyping: Bool
+    /// `Beep` = 3 ("Play a custom sound file"): this file.
+    public var bellSoundFile: String
+    /// "Taskbar/caption indication on bell": 0 disabled, 1 flashing,
+    /// 2 steady (Dock: one bounce, or bouncing until activated).
+    public var bellIndication: Int
+    /// "Ensure window is always on top".
+    public var alwaysOnTop: Bool
+    /// Windows' "Full screen on Alt-Enter", as Option-Return.
+    public var fullScreenOnOptionReturn: Bool
+    /// "Separate window and icon titles" (`WinNameAlways` off): a
+    /// minimised window shows the icon title.
+    public var separateIconTitle: Bool
+
+    public init(settings: PuTTYSettings) {
+        func flag(_ keyword: String, default value: Bool) -> Bool {
+            settings[keyword].map { (Int($0) ?? 0) != 0 } ?? value
+        }
+        fontName = settings["FontName"]
+        showsScrollbar = flag("ScrollBar", default: true)
+        scrollbarOnLeft = flag("ScrollbarOnLeft", default: false)
+        border = CGFloat(max(0, Int(settings["WindowBorder"] ?? "") ?? 1))
+        optionIsMeta = flag("OSXOptionMeta", default: true)
+        commandIsMeta = flag("OSXCommandMeta", default: false)
+        hidesMousePointerWhenTyping = flag("HideMousePtr", default: false)
+        bellSoundFile = settings["Beep"] == "3" ? settings["BellWaveFile"] ?? "" : ""
+        bellIndication = Int(settings["BeepInd"] ?? "") ?? 0
+        alwaysOnTop = flag("AlwaysOnTop", default: false)
+        fullScreenOnOptionReturn = flag("FullScreenOnAltEnter", default: false)
+        separateIconTitle = !flag("WinNameAlways", default: true)
+    }
+}
+
 /// The terminal window's content: draws a session's terminal and turns
 /// keyboard, mouse, scroll and focus events into terminal input.
 @MainActor
@@ -20,13 +66,13 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public let screen = TerminalScreen()
     public private(set) var renderer: TerminalRenderer
 
+    public let options: TerminalViewOptions
     /// Space between the window edge and the cells.
-    public static let border: CGFloat = 1
+    public var border: CGFloat { options.border }
 
     private let scroller = NSScroller()
-    private let showsScrollbar: Bool
-    private let optionIsMeta: Bool
-    private let commandIsMeta: Bool
+    private var showsScrollbar: Bool { options.showsScrollbar }
+    private var bellSound: NSSound?
     private var markedText = NSMutableAttributedString()
     private var lastSelection = ""
     private var gridSize = (columns: 0, rows: 0)
@@ -36,11 +82,8 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     public init(controller: SessionController) {
         self.controller = controller
-        let settings = controller.settings
-        renderer = TerminalRenderer(font: TerminalFont(puttyFontName: settings["FontName"]))
-        showsScrollbar = settings["ScrollBar"] != "0"
-        optionIsMeta = settings["OSXOptionMeta"] != "0"
-        commandIsMeta = settings["OSXCommandMeta"] == "1"
+        options = TerminalViewOptions(settings: controller.settings)
+        renderer = TerminalRenderer(font: TerminalFont(puttyFontName: options.fontName))
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -54,6 +97,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         addSubview(scroller)
 
         controller.terminalDelegate = self
+        observeIconTitle()
     }
 
     @available(*, unavailable)
@@ -61,22 +105,30 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     /// The view size that holds `columns` x `rows` cells.
     public func size(columns: Int, rows: Int) -> NSSize {
-        Self.size(columns: columns, rows: rows, font: renderer.font, scrollbar: showsScrollbar)
+        Self.size(columns: columns, rows: rows, font: renderer.font, options: options)
     }
 
-    /// The view size for `settings`' font, scrollbar and terminal size
-    /// (`TermWidth` x `TermHeight`).
+    /// The view size for `settings`' font, scrollbar, border and terminal
+    /// size (`TermWidth` x `TermHeight`).
     public static func defaultSize(for settings: PuTTYSettings) -> NSSize {
-        size(columns: Int(settings["TermWidth"] ?? "") ?? 80,
-             rows: Int(settings["TermHeight"] ?? "") ?? 24,
-             font: TerminalFont(puttyFontName: settings["FontName"]),
-             scrollbar: settings["ScrollBar"] != "0")
+        let options = TerminalViewOptions(settings: settings)
+        return size(columns: Int(settings["TermWidth"] ?? "") ?? 80,
+                    rows: Int(settings["TermHeight"] ?? "") ?? 24,
+                    font: TerminalFont(puttyFontName: options.fontName), options: options)
     }
 
-    private static func size(columns: Int, rows: Int, font: TerminalFont, scrollbar: Bool) -> NSSize {
-        let scroller = scrollbar ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
-        return NSSize(width: CGFloat(columns) * font.cellWidth + 2 * border + scroller,
-                      height: CGFloat(rows) * font.cellHeight + 2 * border)
+    private static func size(columns: Int, rows: Int, font: TerminalFont,
+                             options: TerminalViewOptions) -> NSSize {
+        let scroller = options.showsScrollbar
+            ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
+        return NSSize(width: CGFloat(columns) * font.cellWidth + 2 * options.border + scroller,
+                      height: CGFloat(rows) * font.cellHeight + 2 * options.border)
+    }
+
+    /// Where the cells start: inside the border, right of a scrollbar on
+    /// the left.
+    public var textOrigin: NSPoint {
+        NSPoint(x: border + (options.scrollbarOnLeft ? scrollerWidth : 0), y: border)
     }
 
     private var scrollerWidth: CGFloat {
@@ -109,7 +161,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     }
 
     private func rowRect(_ row: Int) -> NSRect {
-        NSRect(x: Self.border, y: Self.border + CGFloat(row) * renderer.font.cellHeight,
+        NSRect(x: textOrigin.x, y: textOrigin.y + CGFloat(row) * renderer.font.cellHeight,
                width: CGFloat(screen.columns) * renderer.font.cellWidth,
                height: renderer.font.cellHeight)
     }
@@ -120,11 +172,12 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         context.fill(dirtyRect)
         guard screen.rows > 0 else { return }
         let h = renderer.font.cellHeight
-        let first = max(0, Int(((dirtyRect.minY - Self.border) / h).rounded(.down)))
-        let last = min(screen.rows, Int(((dirtyRect.maxY - Self.border) / h).rounded(.up)))
+        let origin = textOrigin
+        let first = max(0, Int(((dirtyRect.minY - origin.y) / h).rounded(.down)))
+        let last = min(screen.rows, Int(((dirtyRect.maxY - origin.y) / h).rounded(.up)))
         guard first < last else { return }
         context.saveGState()
-        context.translateBy(x: Self.border, y: Self.border)
+        context.translateBy(x: origin.x, y: origin.y)
         renderer.draw(screen, rows: first..<last, in: context)
         context.restoreGState()
     }
@@ -133,14 +186,14 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        scroller.frame = NSRect(x: newSize.width - scrollerWidth, y: 0,
+        scroller.frame = NSRect(x: options.scrollbarOnLeft ? 0 : newSize.width - scrollerWidth, y: 0,
                                 width: scrollerWidth, height: newSize.height)
         resizeTerminal()
     }
 
     private func resizeTerminal() {
-        let usableWidth = bounds.width - scrollerWidth - 2 * Self.border
-        let usableHeight = bounds.height - 2 * Self.border
+        let usableWidth = bounds.width - scrollerWidth - 2 * border
+        let usableHeight = bounds.height - 2 * border
         let columns = max(1, Int(usableWidth / renderer.font.cellWidth))
         let rows = max(1, Int(usableHeight / renderer.font.cellHeight))
         guard (columns, rows) != gridSize, let session = controller.session else { return }
@@ -233,6 +286,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
             NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged),
                                                    name: name, object: window)
         }
+        applyWindowOptions()
         // The terminal takes the keyboard as soon as its window shows.
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
@@ -248,13 +302,21 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     public override func keyDown(with event: NSEvent) {
         guard let session = controller.session else { return }
-        NSCursor.setHiddenUntilMouseMoves(true)
+        if options.hidesMousePointerWhenTyping {
+            NSCursor.setHiddenUntilMouseMoves(true)
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if options.fullScreenOnOptionReturn, event.keyCode == 36,
+           flags.intersection([.option, .command, .control, .shift]) == .option {
+            window?.toggleFullScreen(nil)
+            return
+        }
         if hasMarkedText() {
             inputContext?.handleEvent(event)
             return
         }
-        switch TerminalKeyMapper.action(for: event, optionIsMeta: optionIsMeta,
-                                        commandIsMeta: commandIsMeta) {
+        switch TerminalKeyMapper.action(for: event, optionIsMeta: options.optionIsMeta,
+                                        commandIsMeta: options.commandIsMeta) {
         case .key(let key, let modifiers):
             session.key(key, modifiers: modifiers)
         case .text(let text, let modifiers):
@@ -271,7 +333,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Command combinations reach the terminal only when Command is
         // configured as Meta; otherwise they belong to the menus.
-        guard commandIsMeta, event.type == .keyDown,
+        guard options.commandIsMeta, event.type == .keyDown,
               event.modifierFlags.contains(.command), window?.firstResponder === self else {
             return super.performKeyEquivalent(with: event)
         }
@@ -326,8 +388,8 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
 
     public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        let cellRect = NSRect(x: Self.border + CGFloat(screen.cursorColumn) * renderer.font.cellWidth,
-                              y: Self.border + CGFloat(screen.cursorRow) * renderer.font.cellHeight,
+        let cellRect = NSRect(x: textOrigin.x + CGFloat(screen.cursorColumn) * renderer.font.cellWidth,
+                              y: textOrigin.y + CGFloat(screen.cursorRow) * renderer.font.cellHeight,
                               width: renderer.font.cellWidth, height: renderer.font.cellHeight)
         return window?.convertToScreen(convert(cellRect, to: nil)) ?? cellRect
     }
@@ -337,8 +399,8 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     // MARK: Mouse
 
     private func cell(at point: NSPoint) -> (Int, Int) {
-        let column = Int(((point.x - Self.border) / renderer.font.cellWidth).rounded(.down))
-        let row = Int(((point.y - Self.border) / renderer.font.cellHeight).rounded(.down))
+        let column = Int(((point.x - textOrigin.x) / renderer.font.cellWidth).rounded(.down))
+        let row = Int(((point.y - textOrigin.y) / renderer.font.cellHeight).rounded(.down))
         return (column, row)
     }
 
@@ -394,7 +456,8 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     }
 
     public override func resetCursorRects() {
-        let terminalRect = NSRect(x: 0, y: 0, width: bounds.width - scrollerWidth, height: bounds.height)
+        let terminalRect = NSRect(x: options.scrollbarOnLeft ? scrollerWidth : 0, y: 0,
+                                  width: bounds.width - scrollerWidth, height: bounds.height)
         addCursorRect(terminalRect, cursor: screen.rawMousePointer ? .arrow : .iBeam)
     }
 
@@ -422,11 +485,59 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public func terminal(_ controller: SessionController, ringBell mode: Int32) {
         switch mode {
         case 0:                                         // BELL_DISABLED
-            break
+            return
         case 2:                                         // BELL_VISUAL
             flashVisualBell()
-        default:                                        // default, wave, PC speaker
+        case 3:                                         // BELL_WAVEFILE
+            playBellSound()
+        default:                                        // default, PC speaker
             NSSound.beep()
+        }
+        indicateBell()
+    }
+
+    /// Windows PuTTY plays the file, and beeps instead if it cannot.
+    private func playBellSound() {
+        if bellSound == nil, !options.bellSoundFile.isEmpty {
+            bellSound = NSSound(contentsOf: URL(fileURLWithPath: options.bellSoundFile), byReference: true)
+        }
+        guard let bellSound else {
+            NSSound.beep()
+            return
+        }
+        bellSound.stop()
+        bellSound.play()
+    }
+
+    /// "Taskbar/caption indication on bell", for a window in the
+    /// background: the Dock icon bounces once (flashing) or until the
+    /// app is activated (steady).
+    private func indicateBell() {
+        guard options.bellIndication != 0, !(NSApp.isActive && window?.isKeyWindow == true) else { return }
+        NSApp.requestUserAttention(options.bellIndication == 2 ? .criticalRequest : .informationalRequest)
+    }
+
+    // MARK: Window options
+
+    private func applyWindowOptions() {
+        guard let window else { return }
+        if options.alwaysOnTop {
+            window.level = .floating
+        }
+        if options.separateIconTitle {
+            window.miniwindowTitle = controller.iconTitle.isEmpty ? window.title : controller.iconTitle
+        }
+    }
+
+    private func observeIconTitle() {
+        guard options.separateIconTitle else { return }
+        withObservationTracking {
+            _ = controller.iconTitle
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.applyWindowOptions()
+                self?.observeIconTitle()
+            }
         }
     }
 

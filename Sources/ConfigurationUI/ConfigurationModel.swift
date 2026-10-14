@@ -261,6 +261,100 @@ public final class ConfigurationModel {
         }
     }
 
+    // MARK: Formats of the Terminal and Window panels (M06)
+
+    /// "Initial state of numeric keypad" (`numeric_keypad_handler`): one
+    /// radio over two keywords. 0 Normal, 1 Application, 2 NetHack.
+    public var numericKeypadMode: Int {
+        get { bool(.netHackKeypad) ? 2 : bool(.applicationKeypad) ? 1 : 0 }
+        set {
+            setBool(.applicationKeypad, newValue == 1)
+            setBool(.netHackKeypad, newValue == 2)
+        }
+    }
+
+    /// PuTTY's colour list (`CONF_COLOUR_LIST`), saved as `Colour0` ...
+    /// `Colour21`.
+    public static let colourNames = [
+        "Default Foreground", "Default Bold Foreground",
+        "Default Background", "Default Bold Background",
+        "Cursor Text", "Cursor Colour",
+        "ANSI Black", "ANSI Black Bold", "ANSI Red", "ANSI Red Bold",
+        "ANSI Green", "ANSI Green Bold", "ANSI Yellow", "ANSI Yellow Bold",
+        "ANSI Blue", "ANSI Blue Bold", "ANSI Magenta", "ANSI Magenta Bold",
+        "ANSI Cyan", "ANSI Cyan Bold", "ANSI White", "ANSI White Bold",
+    ]
+
+    /// Colour `index` as (red, green, blue), each 0...255.
+    public func colour(_ index: Int) -> (red: Int, green: Int, blue: Int) {
+        let parts = (settings["Colour\(index)"] ?? "").split(separator: ",", omittingEmptySubsequences: false)
+        func component(_ i: Int) -> Int {
+            i < parts.count ? min(255, max(0, Self.atoi(String(parts[i])))) : 0
+        }
+        return (component(0), component(1), component(2))
+    }
+
+    /// As `colour_handler`: components are clamped to 0...255.
+    public func setColour(_ index: Int, red: Int, green: Int, blue: Int) {
+        let clamp = { (v: Int) in min(255, max(0, v)) }
+        settings["Colour\(index)"] = "\(clamp(red)),\(clamp(green)),\(clamp(blue))"
+    }
+
+    /// The character class of `character` (0...255), saved as
+    /// `Wordness0`, `Wordness32`, ... with 32 values each.
+    public func characterClass(_ character: Int) -> Int {
+        let parts = (settings["Wordness\(character / 32 * 32)"] ?? "").split(separator: ",")
+        let i = character % 32
+        return i < parts.count ? Self.atoi(String(parts[i])) : 0
+    }
+
+    /// `charclass_handler`'s Set button: the given characters get class
+    /// `atoi(text)`.
+    public func setCharacterClass(_ characters: some Sequence<Int>, to text: String) {
+        let value = Self.atoi(text)
+        for character in characters where (0..<256).contains(character) {
+            let key = "Wordness\(character / 32 * 32)"
+            var parts = (settings[key] ?? "").split(separator: ",").map(String.init)
+            while parts.count < 32 { parts.append("0") }
+            parts[character % 32] = String(value)
+            settings[key] = parts.joined(separator: ",")
+        }
+    }
+
+    /// The bell overload times: saved in microseconds on Unix
+    /// (settings.c multiplies PuTTY's milliseconds by 1000); shown in
+    /// seconds, as config.c's fixed-point edit box.
+    public func seconds(_ keyword: PuTTYKeyword) -> String {
+        Self.formatFixedPoint(int(keyword), denominator: 1_000_000)
+    }
+
+    public func setSeconds(_ keyword: PuTTYKeyword, _ text: String) {
+        setInt(keyword, Self.parseFixedPoint(text, denominator: 1_000_000))
+    }
+
+    /// `EDIT_FIXEDPOINT`: the value over `denominator`, without trailing
+    /// zeros.
+    public static func formatFixedPoint(_ value: Int, denominator: Int) -> String {
+        let whole = value / denominator, fraction = abs(value % denominator)
+        guard fraction != 0 else { return String(whole) }
+        var digits = String(fraction)
+        digits = String(repeating: "0", count: String(denominator).count - 1 - digits.count) + digits
+        while digits.hasSuffix("0") { digits.removeLast() }
+        return (value < 0 && whole == 0 ? "-" : "") + "\(whole).\(digits)"
+    }
+
+    /// As config.c reads a fixed-point box (`atof` scaled, truncated).
+    public static func parseFixedPoint(_ text: String, denominator: Int) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        var number = ""
+        for character in trimmed {
+            guard character.isASCII, character.isNumber || character == "." || (number.isEmpty && character == "-") else { break }
+            number.append(character)
+        }
+        guard let value = Double(number) else { return 0 }
+        return Int((value * Double(denominator)).rounded(.towardZero))
+    }
+
     /// C `atoi`: optional whitespace and sign, then leading digits;
     /// 0 if there are none.
     public static func atoi(_ text: String) -> Int {

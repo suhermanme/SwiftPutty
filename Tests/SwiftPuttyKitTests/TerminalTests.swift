@@ -193,7 +193,7 @@ extension KitTests {
                     | UInt32((colour.greenComponent * 255).rounded()) << 8
                     | UInt32((colour.blueComponent * 255).rounded())
             }
-            let b = TerminalView.border, w = font.cellWidth, h = font.cellHeight
+            let b = view.border, w = font.cellWidth, h = font.cellHeight
             // Colours are sRGB; the bitmap may be in the display's colour
             // space, so compare approximately.
             func close(_ a: UInt32, _ b: UInt32) -> Bool {
@@ -259,6 +259,66 @@ extension KitTests {
             #expect(action(9, "v", [.command]) == .ignore)
             #expect(action(9, "v", [.command], commandIsMeta: true) == .text("v", [.meta]))
             #expect(action(0, "a") == .interpret)
+        }
+
+        /// PuTTY decides what Ctrl+Shift+C/V do ("Ctrl + Shift + {C,V}").
+        @Test func controlShiftCAndVGoToPuTTY() {
+            #expect(action(8, "\u{3}", ignoring: "C", [.control, .shift]) == .key(.letterC, [.shift, .control]))
+            #expect(action(9, "\u{16}", ignoring: "V", [.control, .shift, .option])
+                == .key(.letterV, [.shift, .control, .meta]))
+            // Without Shift they stay control characters.
+            #expect(action(8, "\u{3}", ignoring: "c", [.control]) == .text("\u{3}", []))
+        }
+    }
+
+    @Suite("Terminal view options")
+    @MainActor
+    struct TerminalViewOptionsTests {
+        @Test func defaultsAreGTKPuTTYs() {
+            let options = TerminalViewOptions(settings: .defaults())
+            #expect(options.border == 1)
+            #expect(options.showsScrollbar && !options.scrollbarOnLeft)
+            #expect(options.optionIsMeta && !options.commandIsMeta)
+            #expect(!options.hidesMousePointerWhenTyping)
+            #expect(options.bellSoundFile == "" && options.bellIndication == 0)
+            #expect(!options.alwaysOnTop && !options.fullScreenOnOptionReturn)
+            #expect(!options.separateIconTitle)
+        }
+
+        @Test func readsTheWindowSettings() {
+            var settings = PuTTYSettings.defaults()
+            settings["WindowBorder"] = "6"
+            settings["ScrollbarOnLeft"] = "1"
+            settings["HideMousePtr"] = "1"
+            settings["Beep"] = "3"
+            settings["BellWaveFile"] = "/tmp/bell.aiff"
+            settings["BeepInd"] = "2"
+            settings["AlwaysOnTop"] = "1"
+            settings["FullScreenOnAltEnter"] = "1"
+            settings["WinNameAlways"] = "0"
+            settings["OSXOptionMeta"] = "0"
+            let options = TerminalViewOptions(settings: settings)
+            #expect(options.border == 6 && options.scrollbarOnLeft)
+            #expect(options.hidesMousePointerWhenTyping && !options.optionIsMeta)
+            #expect(options.bellSoundFile == "/tmp/bell.aiff" && options.bellIndication == 2)
+            #expect(options.alwaysOnTop && options.fullScreenOnOptionReturn && options.separateIconTitle)
+
+            // The sound file only matters for "Play a custom sound file".
+            settings["Beep"] = "1"
+            #expect(TerminalViewOptions(settings: settings).bellSoundFile == "")
+        }
+
+        @Test func borderAndLeftScrollbarPlaceTheCells() {
+            var settings = PuTTYSettings.defaults()
+            settings["WindowBorder"] = "5"
+            settings["ScrollbarOnLeft"] = "1"
+            let view = TerminalView(controller: SessionController(settings: settings))
+            let font = view.renderer.font
+            let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+            #expect(view.textOrigin == NSPoint(x: 5 + scroller, y: 5))
+            #expect(view.size(columns: 80, rows: 24)
+                == NSSize(width: 80 * font.cellWidth + 10 + scroller, height: 24 * font.cellHeight + 10))
+            #expect(TerminalView.defaultSize(for: settings) == view.size(columns: 80, rows: 24))
         }
     }
 

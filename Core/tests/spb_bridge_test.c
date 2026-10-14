@@ -170,6 +170,29 @@ static void test_normalise(void)
     spb_settings_free(s);
 }
 
+/* PuTTY's character set list (M06). */
+static void test_charsets(void)
+{
+    size_t n = 0;
+    bool utf8 = false, latin1 = false;
+    for (const char *name; (name = spb_charset_name(n)) != NULL; n++) {
+        if (!strcmp(name, "UTF-8"))
+            utf8 = true;
+        if (!strcmp(name, "ISO-8859-1"))
+            latin1 = true;
+    }
+    CHECK(n > 20);
+    CHECK(utf8 && latin1);
+    CHECK(spb_charset_name(100000) == NULL);
+    /* As config.c's codepage_handler shows them. */
+    CHECK(!strcmp(spb_charset_canonical_name(""), "UTF-8"));
+    CHECK(!strcmp(spb_charset_canonical_name("ISO-8859-1"), "ISO-8859-1"));
+    CHECK(!strcmp(spb_charset_canonical_name("CP1252"), "CP1252"));
+    /* An unknown name falls back to the font's encoding, as on Unix. */
+    CHECK(!strcmp(spb_charset_canonical_name("no such charset"),
+                  "Use font encoding"));
+}
+
 static void test_session_lifecycle(void)
 {
     spb_settings *s = spb_settings_new_defaults();
@@ -254,6 +277,7 @@ int main(void)
     test_core_init(state_dir);
     test_defaults();
     test_normalise();
+    test_charsets();
     test_session_lifecycle();
     CHECK(spb_debug_live_settings() == 0);
     test_shutdown();

@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 5
+#define SPB_API_VERSION 6
 
 /* ---------- Library information ---------- */
 
@@ -148,6 +148,16 @@ void spb_settings_normalise(spb_settings *settings);
  * show the destination as it will be used. Also normalises.
  */
 void spb_settings_prepare_session(spb_settings *settings);
+
+/*
+ * PuTTY's character sets ("Remote character set", API v6): the names
+ * the configuration dialog lists, in PuTTY's order (cp_enumerate), and
+ * the canonical name PuTTY shows for a LineCodePage value (an empty
+ * value means the default, UTF-8). Both return static strings;
+ * spb_charset_name returns NULL past the end.
+ */
+const char *spb_charset_name(size_t index);
+const char *spb_charset_canonical_name(const char *line_codepage);
 
 /* ---------- Session ---------- */
 
@@ -429,13 +439,18 @@ typedef enum spb_key {
     SPB_KEY_KP_DECIMAL, SPB_KEY_KP_ENTER, SPB_KEY_KP_PLUS, SPB_KEY_KP_MINUS,
     SPB_KEY_KP_MULTIPLY, SPB_KEY_KP_DIVIDE,
     SPB_KEY_KP_NUM_LOCK,       /* the Mac keypad's Clear key */
+    /* The C and V letter keys, sent only with Ctrl+Shift (API v6): copy
+     * and paste per "Ctrl + Shift + {C,V}" (CONF_ctrlshiftcv), else
+     * Ctrl-C / Ctrl-V, as GTK PuTTY's key_event. */
+    SPB_KEY_C, SPB_KEY_V,
 } spb_key;
 
 /*
  * A non-text key, translated as GTK PuTTY does (unix/window.c key_event)
  * with PuTTY's own formatters: cursor and keypad modes, function key
- * type, Backspace and Return settings, Shift-PageUp scrollback, and
- * Shift-Insert paste.
+ * type, Backspace and Return settings, Shift-PageUp scrollback,
+ * Shift-Insert paste and Ctrl-Insert copy ("{Ctrl,Shift} + Ins"), and
+ * Ctrl+Shift+C/V.
  */
 void spb_session_key(spb_session *session, spb_key key, uint32_t mods);
 

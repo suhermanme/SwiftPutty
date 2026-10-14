@@ -50,6 +50,22 @@ public struct PuTTYSettings: Hashable, Sendable, Codable {
         }
     }
 
+    /// PuTTY's character sets, as its configuration dialog lists them
+    /// ("Remote character set", `LineCodePage`).
+    public static let characterSets: [String] = {
+        var names: [String] = []
+        while let name = spb_charset_name(names.count) {
+            names.append(String(cString: name))
+        }
+        return names
+    }()
+
+    /// The name PuTTY shows for a `LineCodePage` value: canonical, and
+    /// UTF-8 for an empty value.
+    public static func canonicalCharacterSet(_ lineCodePage: String) -> String {
+        String(cString: spb_charset_canonical_name(lineCodePage))
+    }
+
     // A keyword map, encoded as a plain JSON object.
     public init(from decoder: any Decoder) throws {
         values = try decoder.singleValueContainer().decode([String: String].self)

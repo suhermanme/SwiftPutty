@@ -3,10 +3,13 @@ import PuTTYBridge
 import SwiftUI
 
 /// The categories of PuTTY's configuration tree that SwiftPutty has so
-/// far (`config.c` `setup_config_box`; the rest arrive with M06, M09 and
+/// far (`config.c` `setup_config_box`; the rest arrive with M09 and
 /// M12). Order and nesting are PuTTY's.
 public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable {
-    case session, logging, terminal, window, appearance, behaviour, connection, data
+    case session, logging
+    case terminal, keyboard, bell, features
+    case window, appearance, behaviour, translation, selection, copy, colours
+    case connection, data
 
     public var id: Self { self }
 
@@ -16,9 +19,16 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .session: "Session"
         case .logging: "Logging"
         case .terminal: "Terminal"
+        case .keyboard: "Keyboard"
+        case .bell: "Bell"
+        case .features: "Features"
         case .window: "Window"
         case .appearance: "Appearance"
         case .behaviour: "Behaviour"
+        case .translation: "Translation"
+        case .selection: "Selection"
+        case .copy: "Copy"
+        case .colours: "Colours"
         case .connection: "Connection"
         case .data: "Data"
         }
@@ -27,8 +37,9 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
     /// Nesting depth in the tree.
     public var depth: Int {
         switch self {
-        case .logging, .appearance, .behaviour, .data: 1
-        default: 0
+        case .copy: 2
+        case .session, .terminal, .window, .connection: 0
+        default: 1
         }
     }
 
@@ -38,9 +49,16 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .session: "Basic options for your SwiftPutty session"
         case .logging: "Options controlling session logging"
         case .terminal: "Options controlling the terminal emulation"
+        case .keyboard: "Options controlling the effects of keys"
+        case .bell: "Options controlling the terminal bell"
+        case .features: "Enabling and disabling advanced terminal features"
         case .window: "Options controlling SwiftPutty's window"
         case .appearance: "Configure the appearance of SwiftPutty's window"
         case .behaviour: "Configure the behaviour of SwiftPutty's window"
+        case .translation: "Options controlling character set translation"
+        case .selection: "Options controlling copy and paste"
+        case .copy: "Options controlling copying from terminal to clipboard"
+        case .colours: "Options controlling use of colours"
         case .connection: "Options controlling the connection"
         case .data: "Data to send to the server"
         }
@@ -100,7 +118,7 @@ public struct ConfigurationView: View {
             }
             .padding(12)
         }
-        .frame(width: 680, height: 560)
+        .frame(width: 680, height: 640)
         .alert("SwiftPutty Error", isPresented: Binding(get: { model.errorMessage != nil },
                                                         set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") {}
@@ -131,9 +149,16 @@ public struct ConfigurationView: View {
         case .session: SessionPanel(model: model, onOpen: onOpen)
         case .logging: LoggingPanel(model: model)
         case .terminal: TerminalPanel(model: model)
+        case .keyboard: KeyboardPanel(model: model)
+        case .bell: BellPanel(model: model)
+        case .features: FeaturesPanel(model: model)
         case .window: WindowPanel(model: model)
         case .appearance: AppearancePanel(model: model)
         case .behaviour: BehaviourPanel(model: model)
+        case .translation: TranslationPanel(model: model)
+        case .selection: SelectionPanel(model: model)
+        case .copy: CopyPanel(model: model)
+        case .colours: ColoursPanel(model: model)
         case .connection: ConnectionPanel(model: model)
         case .data: DataPanel(model: model)
         }
@@ -181,6 +206,33 @@ struct RadioSetting: View {
     let options: [(label: String, value: String)]
     var horizontal = true
 
+    /// As PuTTY lays out a radio group: the label, then the buttons.
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !label.isEmpty {
+                Text(label)
+            }
+            Picker(label, selection: Binding(get: { model.string(keyword) },
+                                             set: { model.setString(keyword, $0) })) {
+                ForEach(options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            .horizontalRadioGroupLayout(horizontal)
+            .labelsHidden()
+            .padding(.leading, label.isEmpty ? 0 : 12)
+        }
+    }
+}
+
+/// A drop-down list storing PuTTY's saved values.
+struct PopupSetting: View {
+    let model: ConfigurationModel
+    let label: String
+    let keyword: PuTTYKeyword
+    let options: [(label: String, value: String)]
+
     var body: some View {
         Picker(label, selection: Binding(get: { model.string(keyword) },
                                          set: { model.setString(keyword, $0) })) {
@@ -188,8 +240,7 @@ struct RadioSetting: View {
                 Text(option.label).tag(option.value)
             }
         }
-        .pickerStyle(.radioGroup)
-        .horizontalRadioGroupLayout(horizontal)
+        .fixedSize()
     }
 }
 
