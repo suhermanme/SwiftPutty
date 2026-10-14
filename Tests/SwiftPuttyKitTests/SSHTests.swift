@@ -47,7 +47,10 @@ final class SSHTerminal {
 
     func waitForScreen(_ needle: String, timeout: Duration = .seconds(20)) async -> Bool {
         let found = await waitUntil(timeout: timeout) { self.screenText.contains(needle) }
-        if !found { print("Screen lacks \"\(needle)\":\n\(screenText)") }
+        if !found {
+            print("Screen lacks \"\(needle)\":\n\(screenText)\nState: \(controller.state) "
+                  + "\(controller.stateDetail ?? "")\nuppity log:\n\(server.log)")
+        }
         return found
     }
 
