@@ -25,6 +25,8 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     of a failed asynchronous connection attempt.
   - `0004-terminal-free-last-selected-text.patch`: free the terminal's
     last-selected-text buffers when the terminal is freed.
+  - `0005-ssh-bpp-free-clears-queues.patch`: free packets still queued
+    when an SSH connection is torn down.
   - At compile time (no source change), the session-storage functions of
     `unix/storage.c` are renamed, so that SwiftPutty can supply its own
     session storage.

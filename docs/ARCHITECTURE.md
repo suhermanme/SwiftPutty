@@ -46,7 +46,7 @@ for UI classification and for *staging* (§6.4), not as a C API.
 PuTTY reports forwarding outcomes only as Event Log text. A frontend that
 wants a structured "this tunnel is up / failed / refused" state therefore
 needs one small upstream patch: a status-notification hook (§7.3, patch
-`0005`). Two latent upstream memory-safety bugs on the remote-forward
+`0006`). Two latent upstream memory-safety bugs on the remote-forward
 removal path (§5.6) also need fixing, both in SwiftPutty's patch set and,
 ideally, upstream.
 
@@ -404,7 +404,7 @@ reads `log_description`. On failure it calls `del234(s->rportfwds, rpf)`
 the Apply that added it. This is likely under rapid UI changes, an automated
 test loop, or a slow/high-latency server. It is exactly the "repeat
 remote-forward changes many times" scenario the project must survive.
-*Fix (patch `0006`):* when an `rpf` with a pending reply is removed, mark it
+*Fix (patch `0007`):* when an `rpf` with a pending reply is removed, mark it
 `cancelled` and leave the free to the reply handler. If the reply was
 SUCCESS, also send `cancel-tcpip-forward` then (or, if it was already sent,
 just free). SwiftPutty additionally serialises remote-forward changes per
@@ -418,7 +418,7 @@ The next `portfwdmgr_config` (any Apply) or `portfwdmgr_free` touches freed
 memory. *Trigger:* two configured remote forwards that differ in key but map
 to the same server listen address, e.g. `R8080` and `4R8080`, or
 `R8080=a:80` alongside a connection-sharing downstream forwarding 8080.
-*Fix (patch `0007`):* `del234(mgr->forwardings, pfr)` before `pfr_free`,
+*Fix (patch `0008`):* `del234(mgr->forwardings, pfr)` before `pfr_free`,
 mirroring the destroy pass. SwiftPutty validation also rejects such
 configurations before Apply.
 
@@ -505,11 +505,11 @@ sequences `reconfigure` calls from Swift:
 For Windows-parity purists, a hidden preference can switch staging off
 (single-call PuTTY behaviour). It defaults to on.
 
-### 6.5 Structured forwarding status (needs patch `0005`)
+### 6.5 Structured forwarding status (needs patch `0006`)
 
 Swift needs per-tunnel state: `requested`, `listening`, `failed(msg)`,
 `remoteEnabled`, `remoteRefused`, `cancelled`. Upstream only logs text.
-Patch `0005` adds an optional `LogPolicyVtable.portfwd_status` method. It is
+Patch `0006` adds an optional `LogPolicyVtable.portfwd_status` method. It is
 NULL-checked, so all existing upstream implementers are unaffected through
 designated initialisers. Calls are added at the four outcome sites:
 `pfl_listen` result in the create pass, `ssh2_rportfwd_globreq_response`
@@ -817,11 +817,26 @@ D-019). Differences from the §7 proposal:
 - New diagnostics: `spb_debug_uxsel_fds`, `spb_debug_loop_iterations`,
   `spb_debug_after_delay` (schedules through PuTTY's timer queue).
 
+M04 (API v4) enables SSH (D-024). Instead of the §7 proposal's separate
+`hostkey_prompt` / `userpass_prompt` / `weak_crypto_prompt` callbacks:
+
+- User name, password and keyboard-interactive prompts never leave C:
+  the Seat hands them to the Terminal (`term_get_userpass_input`), as GTK
+  PuTTY does.
+- Host-key and weak-crypto confirmations share one `prompt` callback
+  (`spb_prompt`: kind, id, PuTTY's `SeatDialogText` items) and one
+  `spb_session_answer_prompt(id, CANCEL | ACCEPT_ONCE |
+  ACCEPT_AND_STORE)`. `prompt_cancelled` withdraws a dialog whose
+  connection ended.
+- `AUTHENTICATING` is not a separate state: a session is `CONNECTING`
+  until the backend accepts input (D-018), which for SSH is after
+  authentication and channel setup.
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |
 |---|---|---|
-| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0006`/`0007`; ASan reproduction tests (M08, M13); report upstream |
+| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0007`/`0008`; ASan reproduction tests (M08, M13); report upstream |
 | R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | Accept for M02–M10; measure; options: patch `name_lookup` to resolve on a helper thread, or per-session helper process (decide by M14) |
 | R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | Generic overlay over `conf_key_info[]`; round-trip test over all 211 keys in M07 |
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |

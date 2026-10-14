@@ -2,12 +2,15 @@
  * spb_seat.c - the Seat and LogPolicy of a SwiftPutty session.
  *
  * Choices follow upstream's GTK frontend (unix/window.c gtk_seat_vt,
- * gtk_logpolicy_vt) wherever they do not need a dialog. Interactive
- * prompts (passwords, host keys, weak crypto) are refused until the SSH
- * milestone (M04) gives them UI; with the Raw protocol PuTTY never asks.
+ * gtk_logpolicy_vt; unix/dialog.c for the dialogs). Login prompts
+ * (user name, password, keyboard-interactive) are answered in the
+ * terminal, as GTK PuTTY does. Host key and weak-crypto confirmations are
+ * dialogs: the frontend gets a prompt callback and answers later with
+ * spb_session_answer_prompt, while PuTTY waits (SPR_INCOMPLETE).
  */
 
 #include <limits.h>
+#include <string.h>
 
 #include "spb_internal.h"
 #include "terminal/terminal.h"         /* stripctrl_new_term */
@@ -32,10 +35,10 @@ static bool spb_seat_eof(Seat *seat)
     return true;   /* as GTK PuTTY: respond to incoming EOF with outgoing */
 }
 
+/* unix/window.c gtk_seat_get_userpass_input, minus the command line. */
 static SeatPromptResult spb_seat_get_userpass_input(Seat *seat, prompts_t *p)
 {
-    return SPR_SW_ABORT("Interactive prompts are not available yet in "
-                        "this build (milestone M04)");
+    return term_get_userpass_input(seat_session(seat)->term, p);
 }
 
 static void spb_seat_notify_remote_exit(Seat *seat)
@@ -57,29 +60,207 @@ static void spb_seat_nonfatal(Seat *seat, const char *message)
     sfree(line);
 }
 
+/* ---------- Dialogs ---------- */
+
+struct spb_pending_prompt {
+    uint64_t id;
+    spb_prompt_kind kind;
+    void (*callback)(void *ctx, SeatPromptResult result);
+    void *callback_ctx;
+    /* Host key prompts: what "Accept" stores. */
+    char *host, *keytype, *keystr;
+    int port;
+};
+
+static atomic_uint_fast64_t next_prompt_id = 1;
+
+static void free_prompt(struct spb_pending_prompt *pp)
+{
+    sfree(pp->host);
+    sfree(pp->keytype);
+    sfree(pp->keystr);
+    sfree(pp);
+}
+
+static spb_dialog_item_type dialog_item_type(SeatDialogTextType type,
+                                             bool *keep)
+{
+    *keep = true;
+    switch (type) {
+      case SDT_PARA:                  return SPB_DIALOG_PARAGRAPH;
+      case SDT_DISPLAY:               return SPB_DIALOG_DISPLAY;
+      case SDT_SCARY_HEADING:         return SPB_DIALOG_SCARY_HEADING;
+      case SDT_TITLE:                 return SPB_DIALOG_TITLE;
+      case SDT_PROMPT:                return SPB_DIALOG_PROMPT;
+      case SDT_MORE_INFO_KEY:         return SPB_DIALOG_MORE_INFO_KEY;
+      case SDT_MORE_INFO_VALUE_SHORT: return SPB_DIALOG_MORE_INFO_SHORT;
+      case SDT_MORE_INFO_VALUE_BLOB:  return SPB_DIALOG_MORE_INFO_BLOB;
+      default:
+        *keep = false;                 /* SDT_BATCH_ABORT: console only */
+        return SPB_DIALOG_PARAGRAPH;
+    }
+}
+
+/*
+ * Hand a dialog to the frontend. Returns SPR_INCOMPLETE (PuTTY waits for
+ * the callback) or, with no frontend to ask, an abort.
+ */
+static SeatPromptResult ask(spb_session *s, struct spb_pending_prompt *pp,
+                            SeatDialogText *text)
+{
+    if (atomic_load(&s->released) || !s->cb.prompt) {
+        free_prompt(pp);
+        return SPR_SW_ABORT("No user interface is available to answer "
+                            "this question");
+    }
+    if (s->prompt)                     /* PuTTY asks one at a time */
+        spb_seat_cancel_prompt(s);
+    pp->id = atomic_fetch_add(&next_prompt_id, 1);
+    s->prompt = pp;
+
+    spb_dialog_item *items = snewn(text->nitems ? text->nitems : 1,
+                                   spb_dialog_item);
+    size_t n = 0;
+    for (size_t i = 0; i < text->nitems; i++) {
+        bool keep;
+        spb_dialog_item_type type = dialog_item_type(text->items[i].type,
+                                                     &keep);
+        if (keep) {
+            items[n].type = type;
+            items[n].text = text->items[i].text;
+            n++;
+        }
+    }
+    spb_prompt prompt = {
+        .kind = pp->kind, .id = pp->id, .items = items, .n_items = n,
+    };
+    s->cb.prompt(s->cb_ctx, &prompt);
+    sfree(items);
+    return SPR_INCOMPLETE;
+}
+
+/* unix/dialog.c gtk_seat_confirm_ssh_host_key */
 static SeatPromptResult spb_seat_confirm_ssh_host_key(
     Seat *seat, const char *host, int port, const char *keytype,
     char *keystr, SeatDialogText *text, HelpCtx helpctx,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
-    return SPR_SW_ABORT("Host key verification is not available yet in "
-                        "this build (milestone M04)");
+    struct spb_pending_prompt *pp = snew(struct spb_pending_prompt);
+    memset(pp, 0, sizeof(*pp));
+    pp->kind = SPB_PROMPT_HOST_KEY;
+    pp->callback = callback;
+    pp->callback_ctx = ctx;
+    pp->host = dupstr(host);
+    pp->port = port;
+    pp->keytype = dupstr(keytype);
+    pp->keystr = dupstr(keystr);
+    return ask(seat_session(seat), pp, text);
+}
+
+static SeatPromptResult confirm_simple(
+    Seat *seat, spb_prompt_kind kind, SeatDialogText *text,
+    void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
+{
+    struct spb_pending_prompt *pp = snew(struct spb_pending_prompt);
+    memset(pp, 0, sizeof(*pp));
+    pp->kind = kind;
+    pp->callback = callback;
+    pp->callback_ctx = ctx;
+    return ask(seat_session(seat), pp, text);
 }
 
 static SeatPromptResult spb_seat_confirm_weak_crypto_primitive(
     Seat *seat, SeatDialogText *text,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
-    return SPR_SW_ABORT("Weak cryptography confirmation is not available "
-                        "yet in this build (milestone M09)");
+    return confirm_simple(seat, SPB_PROMPT_WEAK_CRYPTO, text, callback, ctx);
 }
 
 static SeatPromptResult spb_seat_confirm_weak_cached_hostkey(
     Seat *seat, SeatDialogText *text,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
-    return SPR_SW_ABORT("Weak host key confirmation is not available "
-                        "yet in this build (milestone M09)");
+    return confirm_simple(seat, SPB_PROMPT_WEAK_CACHED_HOST_KEY, text,
+                          callback, ctx);
+}
+
+/* unix/dialog.c confirm_ssh_host_key_result_callback and
+ * simple_prompt_result_spr_callback */
+static void answer_prompt(spb_session *s, uint64_t id,
+                          spb_prompt_answer answer)
+{
+    struct spb_pending_prompt *pp = s->prompt;
+    if (!pp || pp->id != id || s->exited)
+        return;                        /* stale: already answered or gone */
+    s->prompt = NULL;
+
+    SeatPromptResult result;
+    if (answer == SPB_ANSWER_CANCEL) {
+        result = SPR_USER_ABORT;
+    } else {
+        if (pp->kind == SPB_PROMPT_HOST_KEY &&
+            answer == SPB_ANSWER_ACCEPT_AND_STORE)
+            store_host_key(&s->seat, pp->host, pp->port, pp->keytype,
+                           pp->keystr);
+        result = SPR_OK;
+    }
+    void (*callback)(void *, SeatPromptResult) = pp->callback;
+    void *callback_ctx = pp->callback_ctx;
+    free_prompt(pp);
+    callback(callback_ctx, result);
+}
+
+void spb_seat_cancel_prompt(spb_session *s)
+{
+    struct spb_pending_prompt *pp = s->prompt;
+    if (!pp)
+        return;
+    s->prompt = NULL;
+    uint64_t id = pp->id;
+    free_prompt(pp);
+    if (!atomic_load(&s->released) && s->cb.prompt_cancelled)
+        s->cb.prompt_cancelled(s->cb_ctx, id);
+}
+
+typedef struct answer_cmd {
+    spb_session *s;
+    uint64_t id;
+    spb_prompt_answer answer;
+} answer_cmd;
+
+static void cmd_answer(void *vctx)
+{
+    answer_cmd *cmd = vctx;
+    answer_prompt(cmd->s, cmd->id, cmd->answer);
+    sfree(cmd);
+}
+
+void spb_session_answer_prompt(spb_session *s, uint64_t prompt_id,
+                               spb_prompt_answer answer)
+{
+    answer_cmd *cmd = snew(answer_cmd);
+    cmd->s = s;
+    cmd->id = prompt_id;
+    cmd->answer = answer;
+    if (!spb_loop_post(cmd_answer, cmd))
+        modalfatalbox("SwiftPutty internal error: prompt answered after "
+                      "core shutdown");
+}
+
+/* unix/dialog.c gtk_seat_prompt_descriptions: the wording PuTTY's
+ * dialog text uses for the buttons. */
+static const SeatDialogPromptDescriptions *spb_seat_prompt_descriptions(
+    Seat *seat)
+{
+    static const SeatDialogPromptDescriptions descs = {
+        .hk_accept_action = "press \"Accept\"",
+        .hk_connect_once_action = "press \"Connect Once\"",
+        .hk_cancel_action = "press \"Cancel\"",
+        .hk_cancel_action_Participle = "Pressing \"Cancel\"",
+        .weak_accept_action = "press \"Yes\"",
+        .weak_cancel_action = "press \"No\"",
+    };
+    return &descs;
 }
 
 static bool spb_seat_is_utf8(Seat *seat)
@@ -131,7 +312,7 @@ static const SeatVtable spb_seat_vt = {
     .confirm_ssh_host_key = spb_seat_confirm_ssh_host_key,
     .confirm_weak_crypto_primitive = spb_seat_confirm_weak_crypto_primitive,
     .confirm_weak_cached_hostkey = spb_seat_confirm_weak_cached_hostkey,
-    .prompt_descriptions = nullseat_prompt_descriptions,
+    .prompt_descriptions = spb_seat_prompt_descriptions,
     .is_utf8 = spb_seat_is_utf8,
     .echoedit_update = nullseat_echoedit_update,
     .get_display = nullseat_get_display,

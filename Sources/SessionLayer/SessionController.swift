@@ -45,6 +45,9 @@ public final class SessionController {
     public private(set) var title = ""
     /// Icon title set by the terminal.
     public private(set) var iconTitle = ""
+    /// A dialog PuTTY is waiting on (host key, weak crypto): show it and
+    /// call ``answer(_:with:)``.
+    public private(set) var pendingPrompt: PuTTYPrompt?
 
     /// Process-unique identifier of the running session, once started.
     public var sessionID: UInt64? { session?.id }
@@ -98,6 +101,13 @@ public final class SessionController {
         session?.sendEOF()
     }
 
+    /// Answers the pending prompt.
+    public func answer(_ prompt: PuTTYPrompt, with answer: PuTTYPrompt.Answer) {
+        guard pendingPrompt?.id == prompt.id else { return }
+        pendingPrompt = nil
+        session?.answer(prompt, with: answer)
+    }
+
     /// Disconnects. The session object is kept until the controller goes
     /// away, so its final events still arrive.
     public func close() {
@@ -146,6 +156,10 @@ public final class SessionController {
             terminalDelegate?.terminal(self, requestsPasteFrom: clipboard)
         case .resizeRequested(let columns, let rows):
             terminalDelegate?.terminal(self, requestsResizeTo: columns, rows: rows)
+        case .prompt(let prompt):
+            pendingPrompt = prompt
+        case .promptCancelled(let id):
+            if pendingPrompt?.id == id { pendingPrompt = nil }
         }
     }
 }

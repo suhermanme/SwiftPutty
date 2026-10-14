@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 3
+#define SPB_API_VERSION 4
 
 /* ---------- Library information ---------- */
 
@@ -151,6 +151,51 @@ typedef enum spb_clipboard {
     SPB_CLIPBOARD_SYSTEM,     /* PuTTY CLIP_CLIPBOARD: NSPasteboard.general */
 } spb_clipboard;
 
+/* Questions PuTTY asks the user in a dialog box (not in the terminal). */
+typedef enum spb_prompt_kind {
+    /* The server's host key is not cached, or differs from the cached
+     * one. Answers: ACCEPT_AND_STORE ("Accept"), ACCEPT_ONCE ("Connect
+     * Once"), CANCEL. */
+    SPB_PROMPT_HOST_KEY,
+    /* A negotiated algorithm is below the configured warning threshold.
+     * Answers: ACCEPT_ONCE ("Yes"), CANCEL ("No"). */
+    SPB_PROMPT_WEAK_CRYPTO,
+    /* The cached host key's type is below the warning threshold, though
+     * a better one is available. Answers as for WEAK_CRYPTO. */
+    SPB_PROMPT_WEAK_CACHED_HOST_KEY,
+} spb_prompt_kind;
+
+/* PuTTY's structured dialog text (SeatDialogText). */
+typedef enum spb_dialog_item_type {
+    SPB_DIALOG_PARAGRAPH,        /* a paragraph of prose */
+    SPB_DIALOG_DISPLAY,          /* a fingerprint etc.: monospaced, own line */
+    SPB_DIALOG_SCARY_HEADING,    /* "WARNING - POTENTIAL SECURITY BREACH!" */
+    SPB_DIALOG_TITLE,            /* the dialog's title */
+    SPB_DIALOG_PROMPT,           /* the question (console wording; may be
+                                    omitted by GUIs, as GTK PuTTY does) */
+    SPB_DIALOG_MORE_INFO_KEY,    /* "More info": a label ... */
+    SPB_DIALOG_MORE_INFO_SHORT,  /* ... and its short value ... */
+    SPB_DIALOG_MORE_INFO_BLOB,   /* ... or long value (wrap it) */
+} spb_dialog_item_type;
+
+typedef struct spb_dialog_item {
+    spb_dialog_item_type type;
+    const char *text;
+} spb_dialog_item;
+
+typedef struct spb_prompt {
+    spb_prompt_kind kind;
+    uint64_t id;                 /* pass to spb_session_answer_prompt */
+    const spb_dialog_item *items;
+    size_t n_items;
+} spb_prompt;
+
+typedef enum spb_prompt_answer {
+    SPB_ANSWER_CANCEL,
+    SPB_ANSWER_ACCEPT_ONCE,
+    SPB_ANSWER_ACCEPT_AND_STORE,
+} spb_prompt_answer;
+
 typedef enum spb_session_state {
     SPB_SESSION_CREATED,      /* not started yet */
     SPB_SESSION_CONNECTING,   /* started; the backend is not ready for input */
@@ -198,6 +243,15 @@ typedef struct spb_session_callbacks {
     /* The remote end asked for a terminal size (e.g. DECCOLM). The
      * request is acknowledged at once; the frontend may resize. */
     void (*resize_requested)(void *ctx, int32_t cols, int32_t rows);
+
+    /* --- Dialogs (M04) --- */
+
+    /* PuTTY needs an answer: show a dialog, then call
+     * spb_session_answer_prompt. The connection waits meanwhile. If the
+     * connection ends first, prompt_cancelled is called and the answer is
+     * no longer wanted. Without this callback, prompts are refused. */
+    void (*prompt)(void *ctx, const spb_prompt *prompt);
+    void (*prompt_cancelled)(void *ctx, uint64_t id);
 } spb_session_callbacks;
 
 /*
@@ -214,10 +268,17 @@ spb_session *spb_session_create(const spb_settings *settings,
  * Connect, as PuTTY does when a session window opens: CONNECTING, then
  * CONNECTED or FAILED. Only meaningful in the CREATED state.
  *
- * M02 supports the Raw protocol only; other protocols fail with an
- * explanatory message until their milestone (SSH: M04).
+ * SSH and Raw are supported; other protocols fail with an explanatory
+ * message until their milestone (M11). SSH logins (user name, password,
+ * keyboard-interactive) are prompted for in the terminal, as in PuTTY;
+ * host key confirmation goes through the prompt callback.
  */
 void spb_session_start(spb_session *session);
+
+/* Answer a prompt (spb_session_callbacks.prompt). Answers for prompts
+ * that are no longer pending are ignored. */
+void spb_session_answer_prompt(spb_session *session, uint64_t prompt_id,
+                               spb_prompt_answer answer);
 
 /* Send bytes to the backend (as typed input). Ignored unless the session
  * is CONNECTING or CONNECTED. data is copied before return. */

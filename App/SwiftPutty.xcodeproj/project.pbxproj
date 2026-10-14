@@ -219,6 +219,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftPutty;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SwiftPutty connects to the SSH, Telnet and other servers you open sessions to, including ones on your local network.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "SwiftPutty is not an official PuTTY product. PuTTY is copyright 1997-2026 Simon Tatham and contributors (MIT licence).";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -241,6 +242,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SwiftPutty;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SwiftPutty connects to the SSH, Telnet and other servers you open sessions to, including ones on your local network.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "SwiftPutty is not an official PuTTY product. PuTTY is copyright 1997-2026 Simon Tatham and contributors (MIT licence).";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

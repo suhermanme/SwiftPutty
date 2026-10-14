@@ -531,11 +531,6 @@ static void test_failures(void)
     expect_failure(nxdomain, "Unable to open connection", true);
     spb_settings_free(nxdomain);
 
-    spb_settings *ssh = spb_settings_new_defaults();
-    spb_settings_set(ssh, "HostName", "127.0.0.1");
-    expect_failure(ssh, "M04", false);
-    spb_settings_free(ssh);
-
     spb_settings *telnet = raw_settings("127.0.0.1", 23);
     spb_settings_set(telnet, "Protocol", "telnet");
     expect_failure(telnet, "M11", false);

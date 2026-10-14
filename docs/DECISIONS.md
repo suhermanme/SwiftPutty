@@ -80,7 +80,7 @@ the GTK/Windows frontends. There is no C-level add/remove-tunnel API. To avoid
 when it is the same) based on structured status events (ARCHITECTURE §6.4).
 A preference can disable staging for strict upstream parity.
 **Consequences:** Forwarding semantics are PuTTY's. One small upstream patch
-(`0005`) is needed for structured status.
+(`0006`) is needed for structured status.
 
 ## D-006 — Build PuTTY per architecture, then lipo
 
@@ -117,7 +117,7 @@ upstream `main`. H-1: removing a remote forward with a pending
 `tcpip-forward` reply. H-2: a duplicate remote listen address leaves a freed
 record in the manager tree. Both sit on the release-blocking live-tunnel
 path.
-**Decision:** Carry minimal patches `0006`/`0007`, prove each with an ASan
+**Decision:** Carry minimal patches `0007`/`0008`, prove each with an ASan
 regression test in M08, and offer them upstream. Add defence in depth in
 Swift: serialise remote-forward changes per port, and reject duplicate
 listen addresses during validation.
@@ -364,3 +364,64 @@ otherwise Command shortcuts go to the menus.
 **Consequences:** Byte sequences match upstream exactly and follow
 terminal modes. With Option as Meta, Option-layer characters need
 `OSXOptionMeta` off (configuration UI in M05).
+
+## D-024 — SSH logins in the terminal; dialogs through an asynchronous prompt API
+
+**Status:** Accepted (M04)
+**Context:** PuTTY asks for user names, passwords and keyboard-interactive
+responses through `seat_get_userpass_input`, and for host-key and
+weak-crypto confirmation through `seat_confirm_*` with a completion
+callback. GTK PuTTY answers the first in the terminal
+(`term_get_userpass_input`) and shows dialog boxes for the second.
+**Decision:** The same. Login prompts are handled by PuTTY's terminal, so
+they look and behave as upstream's (echo rules, trust sigil, "Access
+denied" and retry). Dialogs reach the frontend as one generic `prompt`
+callback carrying PuTTY's structured `SeatDialogText` and an id; the
+frontend answers with `spb_session_answer_prompt`. "Accept" stores the
+key with upstream's `store_host_key` (in the private state directory). If
+the connection ends while a dialog is up, the bridge forgets the
+callback (it would call into a freed backend) and tells the frontend with
+`prompt_cancelled`; stale answers are ignored. The macOS sheet lays the
+text out as GTK PuTTY does; a changed-key warning has no default button.
+**Consequences:** No password ever passes through Swift or the UI layer;
+it goes from keystrokes to PuTTY's prompt buffer on the core thread. Any
+future PuTTY dialog maps onto the same API.
+
+## D-025 — SSH test fixture: upstream's uppity behind a loopback relay
+
+**Status:** Accepted (M04); refines D-009
+**Context:** Automated SSH tests need a deterministic local server.
+OpenSSH `sshd` cannot do password authentication unprivileged. PuTTY's
+own test server, `uppity`, can (any user; password "weasel";
+keyboard-interactive "stoat"/"weasel") and is built from the vendored
+tree, but on macOS it rejects TCP clients: it only trusts peers it can
+identify as the same user, and its check reads Linux's `/proc`.
+**Decision:** `spb_ssh_fixture` (test-only) runs `uppity` on a Unix-domain
+socket, which it accepts, and relays a loopback TCP port to it, so the
+client under test uses its real TCP path. Test host keys
+(`Core/tests/fixtures/hostkey-{a,b}.ppk`) are generated with upstream's
+`puttygen`, committed, and marked as not secret. Exit statuses from
+`uppity` can read 127 when its pty reaches end-of-file before it reaps
+the shell (`unix/pty.c`, `EXITTYPE_WEIRD`); tests accept that value, and
+exact exit statuses are checked by hand against OpenSSH.
+**Consequences:** SSH tests run in seconds, offline, in CI on both
+architectures, under the sanitizers. Public-key and agent tests (M09)
+can add OpenSSH `sshd` with key authentication.
+
+## D-026 — Session windows belong to one launch; local network access is declared
+
+**Status:** Accepted (M04)
+**Context:** SwiftUI restores `WindowGroup` windows with their values at
+the next launch, which reconnected old sessions (and showed empty windows
+for values that no longer decoded). PuTTY never reconnects by itself.
+Separately, macOS requires apps to declare local-network use: without it,
+connections to LAN addresses fail with "No route to host".
+**Decision:** Each `SessionRequest` carries an id for the launch that made
+it; a restored window from another launch closes without connecting, and
+windows that cannot be decoded close too. `NSQuitAlwaysKeepsWindows` is
+registered false. The app declares `NSLocalNetworkUsageDescription`, so
+macOS asks the user once.
+**Consequences:** Relaunching shows the launcher only. The first
+connection to a LAN host shows the system's Local Network permission
+prompt.
+

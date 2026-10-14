@@ -69,6 +69,8 @@ struct spb_session {
     spb_session_state state;
     bool exited;                       /* connection gone or going */
 
+    struct spb_pending_prompt *prompt; /* dialog awaiting an answer */
+
     bool active;                       /* in the active-session list */
     spb_session *active_next, *active_prev;
 };
@@ -89,6 +91,8 @@ void spb_session_connection_fatal(spb_session *s, const char *message);
 
 /* spb_seat.c: the session's Seat and LogPolicy */
 void spb_seat_init(spb_session *s);
+/* Forget a pending dialog without answering (the connection is gone). */
+void spb_seat_cancel_prompt(spb_session *s);
 
 /* spb_terminal.c */
 struct spb_screen *spb_screen_new(void);         /* any thread */

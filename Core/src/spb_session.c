@@ -90,6 +90,8 @@ static void destroy_connection(spb_session *s)
 {
     s->exited = true;
     active_remove(s);
+    /* A dialog's answer would call into the backend freed below. */
+    spb_seat_cancel_prompt(s);
     if (s->ldisc) {
         ldisc_free(s->ldisc);
         s->ldisc = NULL;
@@ -144,11 +146,9 @@ static const char *unsupported_protocol_reason(int protocol)
 {
     switch (protocol) {
       case PROT_RAW:
-        return NULL;
       case PROT_SSH:
       case PROT_SSHCONN:
-        return "SSH connections are not available yet in this build "
-            "(milestone M04)";
+        return NULL;
       default:
         return "This connection type is not available yet in this build "
             "(milestone M11)";
@@ -174,6 +174,10 @@ static void cmd_start(void *vctx)
     }
 
     spb_session_set_state(s, SPB_SESSION_CONNECTING, NULL);
+
+    /* As GTK start_backend: PuTTY's own output is trusted until the
+     * backend says otherwise (the trust sigil marks it after that). */
+    seat_set_trust_status(&s->seat, true);
 
     char *realhost = NULL;
     char *error = backend_init(

@@ -94,16 +94,16 @@ extension KitTests {
             #expect(collector.lastDetail?.hasPrefix("Unable to open connection to no-such-host.invalid") == true)
         }
 
-        @Test func sshIsNotAvailableYet() async throws {
+        @Test func telnetIsNotAvailableYet() async throws {
             try TestCore.initialize()
-            var settings = PuTTYSettings.defaults()
-            settings["HostName"] = "127.0.0.1"
+            var settings = rawSettings(port: 23)
+            settings["Protocol"] = "telnet"
             let session = try PuTTYSession(settings: settings)
             let collector = EventCollector(session.events)
             session.start()
             #expect(await collector.wait(for: .failed))
             #expect(collector.states == [.failed])
-            #expect(collector.lastDetail?.contains("M04") == true)
+            #expect(collector.lastDetail?.contains("M11") == true)
         }
 
         @Test func callbacksRunOnTheCoreThreadNotTheMainThread() async throws {

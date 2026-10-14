@@ -1,0 +1,30 @@
+SwiftPutty local patch 0005
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstreaming
+
+ssh/common.c: clear a BPP's packet queues when freeing it.
+
+ssh_bpp_free() freed the BPP but not the packets still in its in_pq and
+out_pq. Packets wait there whenever the protocol layer above has paused,
+for example while the user is looking at the host key dialog during key
+exchange. Closing the session at that point leaked them. Upstream
+frontends end the whole process with the session, so it went unnoticed;
+SwiftPutty closes sessions inside a long-running process. Found by
+`leaks --atExit`.
+
+pq_in_clear() first detaches the queue from the (already freed) layer
+that consumed it, then hands the packets to the global free queue;
+pq_out_clear() frees outgoing packets directly. The version-string BPP
+freed during protocol setup has empty queues, so that path is unchanged.
+
+--- a/ssh/common.c
++++ b/ssh/common.c
+@@ -795,6 +795,8 @@
+ void ssh_bpp_free(BinaryPacketProtocol *bpp)
+ {
+     delete_callbacks_for_context(bpp);
++    pq_in_clear(&bpp->in_pq);
++    pq_out_clear(&bpp->out_pq);
+     bpp->vt->free(bpp);
+ }
+ 

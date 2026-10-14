@@ -187,6 +187,28 @@ function(swiftputty_define_core)
     -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
   add_test(NAME spb_terminal_test COMMAND spb_terminal_test)
 
+  # SSH sessions (M04) against upstream's test server uppity, which
+  # spb_ssh_fixture runs behind a loopback TCP relay (see that file).
+  # uppity and puttygen are upstream's own targets.
+  add_executable(spb_ssh_fixture ${B}/tests/spb_ssh_fixture.c)
+  set_property(TARGET spb_ssh_fixture PROPERTY LINK_LIBRARIES "")
+  target_compile_options(spb_ssh_fixture PRIVATE
+    -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+  add_executable(spb_ssh_test ${B}/tests/spb_ssh_test.c)
+  set_property(TARGET spb_ssh_test PROPERTY LINK_LIBRARIES swiftputty-core)
+  target_compile_options(spb_ssh_test PRIVATE
+    -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+  target_compile_definitions(spb_ssh_test PRIVATE
+    SPB_SSH_FIXTURE="$<TARGET_FILE:spb_ssh_fixture>"
+    SPB_UPPITY="$<TARGET_FILE:uppity>"
+    SPB_FIXTURES_DIR="${B}/tests/fixtures")
+  add_dependencies(spb_ssh_test spb_ssh_fixture uppity)
+  # Upstream's directory-wide link_libraries(-lm -ldl) repeats libraries
+  # that its own targets already carry; the new Apple linker notes each
+  # duplicate. Silence that note for the test server only.
+  target_link_options(uppity PRIVATE -Wl,-no_warn_duplicate_libraries)
+  add_test(NAME spb_ssh_test COMMAND spb_ssh_test)
+
   # Link every archive member, not just the ones a program happens to
   # reference, so that any unresolved symbol in the core fails the build.
   add_executable(spb_link_closure_test ${B}/tests/spb_link_closure_test.c)

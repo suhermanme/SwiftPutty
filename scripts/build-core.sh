@@ -53,7 +53,8 @@ configure_and_build() {
         "$@" > "$dir.configure.log" 2>&1 \
         || { cat "$dir.configure.log" >&2; return 1; }
     cmake --build "$dir" --target swiftputty-core spb_bridge_test spb_session_test \
-        spb_terminal_test spb_link_closure_test
+        spb_terminal_test spb_ssh_test spb_ssh_fixture uppity \
+        spb_link_closure_test
 }
 
 LIBS=()
@@ -78,7 +79,8 @@ lipo -info "$UNIVERSAL/libSwiftPuttyCore.a"
 if [[ $RUN_TESTS == 1 ]]; then
     echo "== C bridge tests ($HOST_ARCH)"
     (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure)
-    for test in spb_bridge_test spb_session_test spb_terminal_test; do
+    for test in spb_bridge_test spb_session_test spb_terminal_test \
+                spb_ssh_test; do
         echo "== $test under leaks --atExit ($HOST_ARCH)"
         leaks --atExit -- "$BUILD/core-$HOST_ARCH/$test" \
             | grep -E "^Process [0-9]+: [0-9]+ leaks" \

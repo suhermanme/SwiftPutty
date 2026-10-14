@@ -5,6 +5,11 @@ import TerminalUI
 struct SwiftPuttyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        // As PuTTY: no windows are reopened at the next launch.
+        UserDefaults.standard.register(defaults: ["NSQuitAlwaysKeepsWindows": false])
+    }
+
     var body: some Scene {
         // The launcher window. In PuTTY the configuration dialog is the
         // entry point and each session gets its own terminal window.
@@ -19,6 +24,9 @@ struct SwiftPuttyApp: App {
         WindowGroup("Session", id: WindowID.session, for: SessionRequest.self) { $request in
             if let request {
                 SessionWindow(request: request)
+            } else {
+                // A restored window whose request no longer decodes.
+                ClosingWindow()
             }
         }
         // PuTTY opens at the configured terminal size (default 80x24).
@@ -30,6 +38,12 @@ struct SwiftPuttyApp: App {
         }
         .windowResizability(.contentSize)
     }
+}
+
+/// Closes the window it is shown in.
+private struct ClosingWindow: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View { Color.clear.onAppear { dismiss() } }
 }
 
 enum WindowID {

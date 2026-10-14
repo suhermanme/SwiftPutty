@@ -15,10 +15,12 @@ is © Simon Tatham and contributors, MIT licensed. See
 ## Status
 
 Milestones **M00** (analysis and architecture), **M01** (build skeleton
-and PuTTY core integration), **M02** (session executor and event loop) and
-**M03** (terminal rendering foundation) are complete. The app opens Raw
-connections in terminal windows driven by PuTTY's own terminal emulator.
-SSH, saved sessions and the configuration dialog are not there yet. See
+and PuTTY core integration), **M02** (session executor and event loop),
+**M03** (terminal rendering foundation) and **M04** (basic SSH session)
+are complete. The app opens SSH and Raw connections in terminal windows
+driven by PuTTY's own SSH implementation and terminal emulator, with
+PuTTY's host key dialog and in-terminal login. Saved sessions and the
+configuration dialog are not there yet. See
 `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Building

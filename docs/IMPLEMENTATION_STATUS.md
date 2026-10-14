@@ -6,7 +6,7 @@
 | **M01** | Build skeleton and PuTTY core integration | **COMPLETE** (2026-10-14) |
 | **M02** | Session executor and event loop | **COMPLETE** (2026-10-14) |
 | **M03** | Terminal rendering foundation | **COMPLETE** (2026-10-14) |
-| M04 | Basic SSH session | NOT STARTED |
+| **M04** | Basic SSH session | **COMPLETE** (2026-10-14) |
 | M05 | Saved sessions and PuTTY config UI | NOT STARTED |
 | M06 | Terminal parity | NOT STARTED |
 | M07 | Live session reconfiguration framework | NOT STARTED |
@@ -20,6 +20,94 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M04 — Basic SSH session
+
+**Delivered**
+
+- **SSH enabled** in the bridge (`PROT_SSH`, `PROT_SSHCONN`), started as
+  GTK PuTTY starts a backend (trust status set before `backend_init`).
+  Upstream's SSH stack is used unchanged.
+- **Logins in the terminal** (D-024): user name, password and
+  keyboard-interactive prompts go to `term_get_userpass_input`, exactly as
+  GTK PuTTY: PuTTY's echo rules, trust sigil and retry messages.
+- **Dialogs** (D-024, API v4): host key (unknown or changed) and
+  weak-crypto prompts reach the frontend as `spb_prompt` (kind, id,
+  PuTTY's `SeatDialogText`); `spb_session_answer_prompt` answers Accept
+  (stores the key via upstream `store_host_key`), Connect Once or Cancel.
+  A dialog whose connection ends is withdrawn (`prompt_cancelled`); stale
+  answers are ignored. PuTTY's button wording comes from
+  `prompt_descriptions`, as GTK's.
+- **Swift**: `PuTTYPrompt` and `.prompt` / `.promptCancelled` events,
+  `PuTTYSession.answer(_:with:)`; `SessionController.pendingPrompt` and
+  `answer(_:with:)`.
+- **UI**: `PuTTYPromptView` sheet laid out as GTK PuTTY's dialog (title,
+  security warning, paragraphs, monospaced fingerprints, "More info";
+  Accept / Connect Once / Cancel, no default button for a changed key;
+  Yes / No for weak crypto). Launcher: connection type SSH (default, port
+  22) or Raw, optional user name. Debug builds:
+  `SWIFTPUTTY_DEBUG_OPEN_SSH=[user@]host:port`.
+- **App fixes** (D-026): session windows are tied to the launch that opened
+  them, so SwiftUI's window restoration no longer reconnects old sessions
+  or leaves empty windows; `NSLocalNetworkUsageDescription` declared, so
+  LAN servers are reachable once the user allows it.
+- **Upstream patch** `0005-ssh-bpp-free-clears-queues.patch` (found by
+  `leaks`): closing an SSH session leaked packets still queued in its BPP,
+  e.g. while the host key dialog was up. Planned patches renumbered again:
+  status hook `0006`, H-1 fix `0007`, H-2 fix `0008`.
+- **Test fixture** (D-025): `spb_ssh_fixture` runs upstream's `uppity`
+  behind a loopback relay; committed test-only host keys; `uppity` is
+  built by `scripts/build-core.sh` (its duplicate-library linker note
+  silenced for that target only).
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4; CI on Apple Silicon and
+Intel)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| `spb_bridge_test`, `spb_session_test`, `spb_terminal_test`, `spb_link_closure_test` | Passed |
+| `spb_ssh_test` (host key accept/store, once, cancel, changed key; dialog withdrawn on close; keyboard-interactive and password logins; shell; pty size; exit status) | Passed (about 3.5 s) |
+| `leaks --atExit`: all four C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan (Debug) | Passed, no reports |
+| C tests under TSan (Debug, `halt_on_error=1`) | Passed, no reports |
+| `swift test` (49 tests, 13 suites; SSH through a real `TerminalView`) | 49/49 passed; SSH suites stable over repeated runs |
+| `swift test --sanitize=address` / `--sanitize=thread` | 49/49 passed, no reports |
+| App Debug build; Release build, universal | Succeeded, 0 warnings |
+| App against the local SSH fixture, screenshot-checked | Host key sheet with PuTTY's text and buttons; window title "127.0.0.1 - SwiftPutty"; relaunch reopens no sessions |
+
+**Manual interoperability check** against a LAN OpenSSH 10.2p1 (Ubuntu)
+server, through the bridge API exactly as the app uses it: hybrid
+post-quantum key exchange (NTRU Prime / Curve25519), AES-256 with AES-NI;
+the host key dialog with PuTTY's full text and More info; password login
+as an ordinary user; pty 80×24 with `TERM=xterm`; commands ran; `exit 7`
+reported as exit status 7.
+
+**Problems found and fixed during M04**
+
+- `uppity` refuses TCP clients on macOS (its same-user check reads
+  `/proc`), hence the Unix-socket relay; Unix socket paths are limited to
+  104 bytes, now checked by the fixture.
+- `uppity` sometimes reports exit status 127 (pty EOF before the shell is
+  reaped); tests accept it (D-025).
+- SwiftUI window restoration reconnected old sessions at launch (D-026).
+- Connections to LAN hosts from the app failed with "No route to host"
+  without the Local Network usage declaration (D-026).
+- Upstream leak of queued SSH packets at teardown (patch `0005`).
+
+**Limitations / not done**
+
+- Public-key authentication from key files, agent forwarding, X11
+  forwarding, GSSAPI, and the remaining authentication options are M09
+  (the agent is used if `SSH_AUTH_SOCK` is set, as PuTTY does; not yet
+  tested). No session specials menu (break, rekey) yet: M10.
+- The Local Network permission prompt and a full login through the app's
+  UI against the LAN server were not exercised by hand (the machine was
+  locked); the same path is covered against `uppity` by automated tests
+  through a real window, and against the LAN server through the bridge.
+- No warning before closing a connected session window (PuTTY's
+  `WarnOnClose`): M10.
 
 ## M03 — Terminal rendering foundation
 
@@ -54,7 +142,7 @@
 - **Upstream patch** `0004-terminal-free-last-selected-text.patch` (found by
   `leaks`): `term_free` leaked the local selection buffers. Planned
   patches renumbered again: status hook `0005`, H-1 fix `0006`, H-2 fix
-  `0007`.
+  `0007` (renumbered again in M04).
 - **Swift**: `PuTTYSession` terminal events and input methods;
   `TerminalScreen` (frame buffers); `SessionController` forwards terminal
   events to a `SessionTerminalDelegate` and tracks the titles.

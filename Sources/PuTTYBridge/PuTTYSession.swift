@@ -67,6 +67,98 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case pasteRequested(PuTTYClipboard)
     /// The application asked for a terminal size (already acknowledged).
     case resizeRequested(cols: Int, rows: Int)
+    /// PuTTY needs an answer to a dialog: reply with
+    /// ``PuTTYSession/answer(_:with:)``. The connection waits meanwhile.
+    case prompt(PuTTYPrompt)
+    /// The connection ended before the prompt was answered: dismiss it.
+    case promptCancelled(id: UInt64)
+}
+
+/// A question PuTTY asks in a dialog box: host key confirmation, or a
+/// weak-cryptography warning. The text is PuTTY's own, structured as
+/// upstream's `SeatDialogText`.
+public struct PuTTYPrompt: Sendable, Equatable, Identifiable {
+    public enum Kind: Sendable, Equatable {
+        /// Unknown or changed host key. Answers: ``Answer/acceptAndStore``
+        /// ("Accept"), ``Answer/acceptOnce`` ("Connect Once"), ``Answer/cancel``.
+        case hostKey
+        /// An algorithm below the warning threshold. Answers:
+        /// ``Answer/acceptOnce`` ("Yes"), ``Answer/cancel`` ("No").
+        case weakCrypto
+        /// The cached host key's type is below the warning threshold.
+        /// Answers as for ``weakCrypto``.
+        case weakCachedHostKey
+    }
+
+    public enum Answer: Sendable {
+        case cancel, acceptOnce, acceptAndStore
+    }
+
+    public struct Item: Sendable, Equatable {
+        public enum Style: Sendable, Equatable {
+            case paragraph
+            /// Monospaced, on its own line (fingerprints, key types).
+            case display
+            /// "WARNING - POTENTIAL SECURITY BREACH!"
+            case scaryHeading
+            case title
+            /// The console-style question; GUIs omit it, as GTK PuTTY does.
+            case prompt
+            case moreInfoKey
+            case moreInfoShortValue
+            case moreInfoLongValue
+        }
+        public var style: Style
+        public var text: String
+
+        public init(style: Style, text: String) {
+            self.style = style
+            self.text = text
+        }
+    }
+
+    public let id: UInt64
+    public let kind: Kind
+    public let items: [Item]
+
+    public var title: String? {
+        items.first { $0.style == .title }?.text
+    }
+
+    /// Whether PuTTY marked this as a possible attack (changed host key).
+    public var isWarning: Bool {
+        items.contains { $0.style == .scaryHeading }
+    }
+
+    init(_ prompt: UnsafePointer<spb_prompt>) {
+        let p = prompt.pointee
+        id = p.id
+        kind = switch p.kind {
+        case SPB_PROMPT_WEAK_CRYPTO: .weakCrypto
+        case SPB_PROMPT_WEAK_CACHED_HOST_KEY: .weakCachedHostKey
+        default: .hostKey
+        }
+        items = (0..<p.n_items).map { index in
+            let item = p.items[index]
+            let style: Item.Style = switch item.type {
+            case SPB_DIALOG_DISPLAY: .display
+            case SPB_DIALOG_SCARY_HEADING: .scaryHeading
+            case SPB_DIALOG_TITLE: .title
+            case SPB_DIALOG_PROMPT: .prompt
+            case SPB_DIALOG_MORE_INFO_KEY: .moreInfoKey
+            case SPB_DIALOG_MORE_INFO_SHORT: .moreInfoShortValue
+            case SPB_DIALOG_MORE_INFO_BLOB: .moreInfoLongValue
+            default: .paragraph
+            }
+            return Item(style: style, text: String(cString: item.text))
+        }
+    }
+
+    public init(id: UInt64, kind: Kind, items: [Item]) {
+        self.id = id
+        self.kind = kind
+        self.items = items
+    }
 }
 
 /// The clipboards PuTTY's terminal uses (docs/CONFIGURATION_PARITY.md).
@@ -150,6 +242,13 @@ public final class PuTTYSession: Sendable {
             },
             resize_requested: { ctx, cols, rows in
                 EventSink.from(ctx).yield(.resizeRequested(cols: Int(cols), rows: Int(rows)))
+            },
+            prompt: { ctx, prompt in
+                guard let prompt else { return }
+                EventSink.from(ctx).yield(.prompt(PuTTYPrompt(prompt)))
+            },
+            prompt_cancelled: { ctx, id in
+                EventSink.from(ctx).yield(.promptCancelled(id: id))
             })
 
         var error: UnsafeMutablePointer<CChar>?
@@ -172,8 +271,10 @@ public final class PuTTYSession: Sendable {
 
     /// Connects, as PuTTY does when a session window opens.
     ///
-    /// M02 supports the Raw protocol only; other protocols fail with an
-    /// explanatory message until their milestone (SSH: M04).
+    /// SSH and Raw are supported; other protocols fail with an
+    /// explanatory message until their milestone (M11). SSH logins are
+    /// prompted for in the terminal; host keys through
+    /// ``PuTTYSessionEvent/prompt(_:)``.
     public func start() {
         spb_session_start(handle)
     }
@@ -193,6 +294,17 @@ public final class PuTTYSession: Sendable {
     /// Sends end-of-file to the connection.
     public func sendEOF() {
         spb_session_send_eof(handle)
+    }
+
+    /// Answers a ``PuTTYSessionEvent/prompt(_:)``. Answers to prompts
+    /// that are no longer pending are ignored.
+    public func answer(_ prompt: PuTTYPrompt, with answer: PuTTYPrompt.Answer) {
+        let value: spb_prompt_answer = switch answer {
+        case .cancel: SPB_ANSWER_CANCEL
+        case .acceptOnce: SPB_ANSWER_ACCEPT_ONCE
+        case .acceptAndStore: SPB_ANSWER_ACCEPT_AND_STORE
+        }
+        spb_session_answer_prompt(handle, prompt.id, value)
     }
 
     /// Disconnects; the session becomes ``PuTTYSessionState/closed``.

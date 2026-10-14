@@ -2,13 +2,15 @@ import PuTTYBridge
 import SwiftUI
 
 /// The launcher window. Until saved sessions and the configuration UI
-/// exist (M05) it reports the state of the PuTTY core and opens Raw
-/// connections.
+/// exist (M05) it reports the state of the PuTTY core and opens SSH and
+/// Raw connections.
 struct LauncherView: View {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
     @State private var host = ""
-    @State private var port = "23"
+    @State private var port = "22"
+    @State private var userName = ""
+    @State private var connectionType = SessionRequest.ConnectionType.ssh
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -40,7 +42,22 @@ struct LauncherView: View {
                             .frame(width: 64)
                     }
                     HStack {
-                        Text("Connection type: Raw. SSH and the full configuration arrive in later milestones.")
+                        Picker("Connection type", selection: $connectionType) {
+                            ForEach(SessionRequest.ConnectionType.allCases, id: \.self) { type in
+                                Text(type.label).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .onChange(of: connectionType) { _, type in
+                            port = String(type.defaultPort)
+                        }
+                        if connectionType == .ssh {
+                            TextField("User name (optional)", text: $userName)
+                        }
+                    }
+                    HStack {
+                        Text("Saved sessions and the full configuration arrive in a later milestone.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -52,7 +69,7 @@ struct LauncherView: View {
                 }
                 .padding(4)
             } label: {
-                Text("Raw connection")
+                Text("Connection")
             }
 
             HStack {
@@ -66,10 +83,20 @@ struct LauncherView: View {
         .frame(width: 460)
         #if DEBUG
         .task {
-            // Developer aid: SWIFTPUTTY_DEBUG_OPEN_RAW=host:port opens a Raw
-            // session at launch (debug builds only).
-            if let target = ProcessInfo.processInfo.environment["SWIFTPUTTY_DEBUG_OPEN_RAW"],
-               let colon = target.lastIndex(of: ":"), let port = Int(target[target.index(after: colon)...]) {
+            // Developer aid (debug builds only): SWIFTPUTTY_DEBUG_OPEN_RAW or
+            // SWIFTPUTTY_DEBUG_OPEN_SSH=[user@]host:port opens a session at
+            // launch, for screenshots and manual checks.
+            let environment = ProcessInfo.processInfo.environment
+            for (variable, type) in [("SWIFTPUTTY_DEBUG_OPEN_RAW", SessionRequest.ConnectionType.raw),
+                                     ("SWIFTPUTTY_DEBUG_OPEN_SSH", .ssh)] {
+                guard var target = environment[variable] else { continue }
+                if let at = target.lastIndex(of: "@") {
+                    userName = String(target[..<at])
+                    target = String(target[target.index(after: at)...])
+                }
+                guard let colon = target.lastIndex(of: ":"),
+                      let port = Int(target[target.index(after: colon)...]) else { continue }
+                connectionType = type
                 host = String(target[..<colon])
                 self.port = String(port)
                 open()
@@ -87,7 +114,11 @@ struct LauncherView: View {
     private func open() {
         guard canOpen, let port = Int(port) else { return }
         openWindow(id: WindowID.session,
-                   value: SessionRequest(host: host.trimmingCharacters(in: .whitespaces), port: port))
+                   value: SessionRequest(connectionType: connectionType,
+                                         host: host.trimmingCharacters(in: .whitespaces),
+                                         port: port,
+                                         userName: connectionType == .ssh
+                                             ? userName.trimmingCharacters(in: .whitespaces) : ""))
     }
 
     @ViewBuilder
