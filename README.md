@@ -48,6 +48,12 @@ scripts/        build and test scripts
 docs/           project documentation
 ```
 
+## Licence
+
+SwiftPutty is distributed under the MIT licence, the same licence as
+PuTTY: see `LICENSE`. The bundled PuTTY source keeps its own copyright and
+licence (`Vendor/putty/LICENCE`, `THIRD_PARTY_NOTICES.md`).
+
 ## Documentation
 
 | Document | Contents |
