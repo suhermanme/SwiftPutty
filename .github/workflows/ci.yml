@@ -56,23 +56,26 @@ jobs:
           set -o pipefail
           scripts/test-all.sh --stage swift-build 2>&1 | tee -a test-all.log
 
+      # `script` gives the tests a pseudo-terminal, so their progress
+      # lines are written as they happen (with a pipe they are buffered,
+      # and lost if the step times out).
       - name: Swift tests
         timeout-minutes: 15
         run: |
           set -o pipefail
-          scripts/test-all.sh --stage swift 2>&1 | tee -a test-all.log
+          script -q /dev/null scripts/test-all.sh --stage swift < /dev/null 2>&1 | tee -a test-all.log
 
       - name: Swift tests (AddressSanitizer)
         timeout-minutes: 20
         run: |
           set -o pipefail
-          scripts/test-all.sh --stage swift-asan 2>&1 | tee -a test-all.log
+          script -q /dev/null scripts/test-all.sh --stage swift-asan < /dev/null 2>&1 | tee -a test-all.log
 
       - name: Swift tests (ThreadSanitizer)
         timeout-minutes: 20
         run: |
           set -o pipefail
-          scripts/test-all.sh --stage swift-tsan 2>&1 | tee -a test-all.log
+          script -q /dev/null scripts/test-all.sh --stage swift-tsan < /dev/null 2>&1 | tee -a test-all.log
 
       - name: App builds (Debug, universal Release)
         timeout-minutes: 30
