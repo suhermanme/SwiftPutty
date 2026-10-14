@@ -1,0 +1,22 @@
+SwiftPutty local patch 0003
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstreaming
+
+unix/network.c: free the error message of a failed asynchronous connect.
+
+When a non-blocking connect() fails, net_select_result() builds the
+error text with dupstr()/dupprintf() and passes it to plug_log(), which
+only formats it into an Event Log line. The string was never freed, so
+every failed connection attempt (each candidate address tried) leaked
+it. Found by `leaks --atExit` on SwiftPutty's session tests.
+
+--- a/unix/network.c
++++ b/unix/network.c
+@@ -1427,6 +1427,7 @@
+                     thisaddr = sk_extractaddr_tmp(s->addr, &s->step);
+                     plug_log(s->plug, &s->sock, PLUGLOG_CONNECT_FAILED,
+                              &thisaddr, s->port, errmsg, err);
++                    sfree(errmsg);
+ 
+                     while (err && s->addr && sk_nextaddr(s->addr, &s->step)) {
+                         err = try_connect(s);

@@ -1,0 +1,63 @@
+# Third-Party Notices
+
+SwiftPutty is an independent project. It is **not** an official PuTTY
+product and is not affiliated with or endorsed by the PuTTY developers.
+
+## PuTTY
+
+- **Component:** PuTTY portable core (SSH, cryptography, terminal emulator,
+  port forwarding, proxies, settings) and Unix platform layer
+- **Version:** 0.85 (git tag `0.85`, commit
+  `a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1`)
+- **Source:** https://the.earth.li/~sgtatham/putty/0.85/putty-0.85.tar.gz
+  (SHA-256 `13fd4db2936d03b73812a7bcc2a658e4dd29cc776a56c3670a7fc6f1a0ee8af8`);
+  project page https://www.chiark.greenend.org.uk/~sgtatham/putty/
+- **Location in this repository:** `Vendor/putty/`
+- **Licence:** MIT. The full text is in `Vendor/putty/LICENCE` and is
+  reproduced below.
+- **Local modifications:** applied at build time from `patches/` (the
+  vendored tree is unmodified). Details in `docs/UPSTREAM_PUTTY.md`:
+  - `0001-arm-arch-queries-sysctl-fallthrough.patch`: return a defined
+    value from `test_sysctl_flag()` when `sysctlbyname()` fails.
+  - `0002-pollwrap-hup-wakes-writers.patch`: treat `POLLHUP` as
+    writable, so a refused connection is reported on macOS.
+  - `0003-network-free-connect-error-message.patch`: free the error text
+    of a failed asynchronous connection attempt.
+  - At compile time (no source change), the session-storage functions of
+    `unix/storage.c` are renamed, so that SwiftPutty can supply its own
+    session storage.
+
+```
+PuTTY is copyright 1997-2026 Simon Tatham.
+
+Portions copyright Robert de Bath, Joris van Rantwijk, Delian
+Delchev, Andreas Schultz, Jeroen Massar, Wez Furlong, Nicolas Barry,
+Justin Bradford, Ben Harris, Malcolm Smith, Ahmad Khalifa, Markus
+Kuhn, Colin Watson, Christopher Staite, Lorenz Diener, Christian
+Brabandt, Jeff Smith, Pavel Kryukov, Maxim Kuznetsov, Svyatoslav
+Kuzmich, Nico Williams, Viktor Dukhovni, Josh Dersch, Lars Brinkhoff,
+and CORE SDI S.A.
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files
+(the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software,
+and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+The vendored tree also contains third-party code that PuTTY itself
+incorporates. It is covered by the notices inside `Vendor/putty/`, which
+are retained unmodified.

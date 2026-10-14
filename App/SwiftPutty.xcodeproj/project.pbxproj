@@ -1,0 +1,288 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5A0000000000000000000101 /* PuTTYBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000701 /* PuTTYBridge */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		5A0000000000000000000201 /* SwiftPutty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SwiftPutty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		5A0000000000000000000301 /* SwiftPutty */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SwiftPutty;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5A0000000000000000000401 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A0000000000000000000101 /* PuTTYBridge in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5A0000000000000000000501 = {
+			isa = PBXGroup;
+			children = (
+				5A0000000000000000000301 /* SwiftPutty */,
+				5A0000000000000000000502 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5A0000000000000000000502 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5A0000000000000000000201 /* SwiftPutty.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5A0000000000000000000601 /* SwiftPutty */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A0000000000000000000B02 /* Build configuration list for PBXNativeTarget "SwiftPutty" */;
+			buildPhases = (
+				5A0000000000000000000801 /* Sources */,
+				5A0000000000000000000401 /* Frameworks */,
+				5A0000000000000000000802 /* Resources */,
+				5A0000000000000000000803 /* Copy Licence Notices */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5A0000000000000000000301 /* SwiftPutty */,
+			);
+			name = SwiftPutty;
+			packageProductDependencies = (
+				5A0000000000000000000701 /* PuTTYBridge */,
+			);
+			productName = SwiftPutty;
+			productReference = 5A0000000000000000000201 /* SwiftPutty.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5A0000000000000000000901 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					5A0000000000000000000601 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 5A0000000000000000000B01 /* Build configuration list for PBXProject "SwiftPutty" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 5A0000000000000000000501;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5A0000000000000000000502 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5A0000000000000000000601 /* SwiftPutty */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5A0000000000000000000802 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5A0000000000000000000803 /* Copy Licence Notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../THIRD_PARTY_NOTICES.md",
+				"$(SRCROOT)/../Vendor/putty/LICENCE",
+			);
+			name = "Copy Licence Notices";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/THIRD_PARTY_NOTICES.md",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/PuTTY-LICENCE.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\ncp \"${SCRIPT_INPUT_FILE_0}\" \"${SCRIPT_OUTPUT_FILE_0}\"\ncp \"${SCRIPT_INPUT_FILE_1}\" \"${SCRIPT_OUTPUT_FILE_1}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5A0000000000000000000801 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		5A0000000000000000000A01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5A0000000000000000000A02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		5A0000000000000000000A03 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftPutty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "SwiftPutty is not an official PuTTY product. PuTTY is copyright 1997-2026 Simon Tatham and contributors (MIT licence).";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.swiftputty.SwiftPutty;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		5A0000000000000000000A04 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = SwiftPutty;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "SwiftPutty is not an official PuTTY product. PuTTY is copyright 1997-2026 Simon Tatham and contributors (MIT licence).";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.swiftputty.SwiftPutty;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5A0000000000000000000B01 /* Build configuration list for PBXProject "SwiftPutty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A0000000000000000000A01 /* Debug */,
+				5A0000000000000000000A02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5A0000000000000000000B02 /* Build configuration list for PBXNativeTarget "SwiftPutty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A0000000000000000000A03 /* Debug */,
+				5A0000000000000000000A04 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5A0000000000000000000701 /* PuTTYBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
+			productName = PuTTYBridge;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 5A0000000000000000000901 /* Project object */;
+}

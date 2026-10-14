@@ -1,0 +1,25 @@
+SwiftPutty local patch 0001
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstreaming
+
+arm_arch_queries.h: return SYSCTL_MISSING when sysctlbyname() fails.
+
+On macOS builds with HAVE_SYSCTLBYNAME, test_sysctl_flag() fell off the
+end of a non-void function when sysctlbyname() failed (e.g. the queried
+hw.optional.* flag does not exist on the running OS version). The
+caller then read an indeterminate SysctlResult, which could report a
+CPU feature as present. Clang reports this as -Wreturn-type.
+
+--- a/unix/utils/arm_arch_queries.h
++++ b/unix/utils/arm_arch_queries.h
+@@ -60,9 +60,8 @@
+         size == sizeof(value)) {
+         return value != 0 ? SYSCTL_ON : SYSCTL_OFF;
+     }
+-#else /* HAVE_SYSCTLBYNAME */
+-    return SYSCTL_MISSING;
+ #endif /* HAVE_SYSCTLBYNAME */
++    return SYSCTL_MISSING;
+ }
+ #endif /* defined __APPLE__ */
+ 

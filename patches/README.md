@@ -1,0 +1,19 @@
+# Local patches to PuTTY
+
+`scripts/prepare-putty-src.sh` copies `Vendor/putty/` to
+`build/putty-src/` and applies every `*.patch` here in name order with
+`patch -p1`. It fails if any patch does not apply cleanly.
+`Vendor/putty/` itself is never modified.
+
+Each patch:
+
+- is a unified diff relative to the PuTTY source root (`a/…`, `b/…`);
+- starts with a header naming the upstream version it was made against,
+  its purpose, and its upstream status;
+- is listed in `docs/UPSTREAM_PUTTY.md` and `THIRD_PARTY_NOTICES.md`.
+
+| Patch | Purpose | Upstream status |
+|---|---|---|
+| `0001-arm-arch-queries-sysctl-fallthrough.patch` | `test_sysctl_flag()` returned an indeterminate value when `sysctlbyname()` failed on macOS | Not yet reported; suitable for upstream |
+| `0002-pollwrap-hup-wakes-writers.patch` | A refused non-blocking `connect()` (`POLLHUP` only on macOS) was never dispatched, so the poll loop spun forever | Not yet reported; suitable for upstream |
+| `0003-network-free-connect-error-message.patch` | The error text of each failed asynchronous `connect()` leaked | Not yet reported; suitable for upstream |

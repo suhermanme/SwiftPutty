@@ -1,0 +1,34 @@
+SwiftPutty local patch 0002
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstreaming
+
+pollwrap.c: report POLLHUP to an fd waiting for writability.
+
+uxsel's model is select(): a socket waiting for SELECT_W is reported
+writable when it has a pending error or the connection is gone, and the
+backend then discovers the error (e.g. via SO_ERROR after a non-blocking
+connect()). pollwrap translated that to poll(), but only POLLOUT and
+POLLERR counted as "writable".
+
+On macOS, poll() reports a refused non-blocking connect() on a TCP socket
+as POLLHUP alone (no POLLOUT, no POLLERR), while select() marks the same
+socket writable. pollwrap_get_fd_rwx() therefore returned 0 for the
+socket, nothing was dispatched, and every later poll() returned at once:
+the event loop spun at 100% CPU and the connection never reported its
+failure. unix/cliloop.c (plink, psftp, pscp) and SwiftPutty's core loop
+are both affected.
+
+Count POLLHUP as writable too, as already done for readability, which
+matches select().
+
+--- a/unix/utils/pollwrap.c
++++ b/unix/utils/pollwrap.c
+@@ -116,7 +116,7 @@
+ #define SELECT_X_IN (POLLPRI)
+ 
+ #define SELECT_R_OUT (SELECT_R_IN | POLLERR | POLLHUP)
+-#define SELECT_W_OUT (SELECT_W_IN | POLLERR)
++#define SELECT_W_OUT (SELECT_W_IN | POLLERR | POLLHUP)
+ #define SELECT_X_OUT (SELECT_X_IN)
+ 
+ void pollwrap_add_fd_rwx(pollwrapper *pw, int fd, int rwx)

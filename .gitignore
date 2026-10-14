@@ -1,0 +1,11 @@
+# Build outputs (scripts/build-core.sh, scripts/build-app.sh, swift build)
+/build/
+/.build/
+/.swiftpm/
+DerivedData/
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+
+.DS_Store

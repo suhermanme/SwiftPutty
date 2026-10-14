@@ -1,0 +1,4 @@
+module PuTTYBridgeC {
+    header "PuTTYBridge.h"
+    export *
+}
