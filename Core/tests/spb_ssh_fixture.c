@@ -35,6 +35,16 @@
 #include <unistd.h>
 
 static char socket_path[1024];
+static volatile pid_t uppity_pid = -1;
+
+/* Never leave uppity behind, however the fixture ends. */
+static void stop_on_signal(int sig)
+{
+    if (uppity_pid > 0)
+        kill(uppity_pid, SIGTERM);
+    unlink(socket_path);
+    _exit(128 + sig);
+}
 
 static void *relay(void *arg)
 {
@@ -93,6 +103,10 @@ int main(int argc, char **argv)
     }
     unlink(socket_path);
 
+    signal(SIGTERM, stop_on_signal);
+    signal(SIGINT, stop_on_signal);
+    signal(SIGHUP, stop_on_signal);
+
     pid_t child = fork();
     if (child == 0) {
         setenv("SHELL", "/bin/sh", 1);
@@ -111,6 +125,8 @@ int main(int argc, char **argv)
         perror("exec uppity");
         _exit(127);
     }
+
+    uppity_pid = child;
 
     /* Wait for uppity's socket. */
     struct stat st;

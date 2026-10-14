@@ -39,6 +39,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Section headings. Under GitHub Actions each also becomes a notice
+# annotation, which is recorded as it is printed, so the last section
+# reached is known even if the runner dies.
+section() {
+    echo "== $*"
+    if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+        echo "::notice title=build-core::$*"
+    fi
+}
+
 "$ROOT/scripts/prepare-putty-src.sh" "$BUILD/putty-src"
 
 configure_and_build() {
@@ -59,12 +69,12 @@ configure_and_build() {
 
 LIBS=()
 for arch in "${ARCHS[@]}"; do
-    echo "== Building core for $arch ($CONFIG)"
+    section "Building core for $arch ($CONFIG)"
     configure_and_build "$BUILD/core-$arch" "$arch" "$CONFIG"
     LIBS+=("$BUILD/core-$arch/libSwiftPuttyCore.a")
 done
 
-echo "== Creating universal library and xcframework"
+section "Creating universal library and xcframework"
 UNIVERSAL="$BUILD/universal"
 rm -rf "$UNIVERSAL" "$BUILD/SwiftPuttyCore.xcframework"
 mkdir -p "$UNIVERSAL/Headers"
@@ -77,11 +87,11 @@ xcodebuild -create-xcframework \
 lipo -info "$UNIVERSAL/libSwiftPuttyCore.a"
 
 if [[ $RUN_TESTS == 1 ]]; then
-    echo "== C bridge tests ($HOST_ARCH)"
+    section "C bridge tests ($HOST_ARCH)"
     (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
     for test in spb_bridge_test spb_session_test spb_terminal_test \
                 spb_ssh_test; do
-        echo "== $test under leaks --atExit ($HOST_ARCH)"
+        section "$test under leaks --atExit ($HOST_ARCH)"
         leaks --atExit -- "$BUILD/core-$HOST_ARCH/$test" \
             | grep -E "^Process [0-9]+: [0-9]+ leaks" \
             | tee /dev/stderr | grep -q ": 0 leaks"
@@ -89,19 +99,23 @@ if [[ $RUN_TESTS == 1 ]]; then
 fi
 
 if [[ $RUN_ASAN == 1 ]]; then
-    echo "== C bridge tests with ASan+UBSan ($HOST_ARCH)"
+    section "C bridge tests with ASan+UBSan ($HOST_ARCH)"
     SAN_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
     configure_and_build "$BUILD/core-asan-$HOST_ARCH" "$HOST_ARCH" Debug \
         -DCMAKE_C_FLAGS="$SAN_FLAGS" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-    (cd "$BUILD/core-asan-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
+    # The SSH test server and relay run unsanitized (spb_ssh_test.c).
+    (cd "$BUILD/core-asan-$HOST_ARCH" \
+        && SPB_SSH_FIXTURE_DIR="$BUILD/core-$HOST_ARCH" \
+           ctest --output-on-failure --timeout 600)
 fi
 
 if [[ $RUN_TSAN == 1 ]]; then
-    echo "== C bridge tests with TSan ($HOST_ARCH)"
+    section "C bridge tests with TSan ($HOST_ARCH)"
     configure_and_build "$BUILD/core-tsan-$HOST_ARCH" "$HOST_ARCH" Debug \
         -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
     (cd "$BUILD/core-tsan-$HOST_ARCH" \
-        && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure --timeout 600)
+        && SPB_SSH_FIXTURE_DIR="$BUILD/core-$HOST_ARCH" \
+           TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure --timeout 600)
 fi

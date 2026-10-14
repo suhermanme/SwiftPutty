@@ -51,8 +51,31 @@ typedef struct fixture {
 
 static char workdir[512];
 
+/*
+ * The fixture binaries. Sanitizer builds run the plain build's copies
+ * (SPB_SSH_FIXTURE_DIR, set by scripts/build-core.sh): the sanitizers are
+ * for the code under test, not for the test server, whose forked shells
+ * gain nothing from running sanitized.
+ */
+static void fixture_paths(const char **fixture, const char **uppity)
+{
+    static char fx[1024], up[1024];
+    const char *dir = getenv("SPB_SSH_FIXTURE_DIR");
+    if (dir && *dir) {
+        snprintf(fx, sizeof(fx), "%s/spb_ssh_fixture", dir);
+        snprintf(up, sizeof(up), "%s/uppity", dir);
+        *fixture = fx;
+        *uppity = up;
+    } else {
+        *fixture = SPB_SSH_FIXTURE;
+        *uppity = SPB_UPPITY;
+    }
+}
+
 static fixture fixture_start(const char *hostkey, int port)
 {
+    const char *fixture_bin, *uppity_bin;
+    fixture_paths(&fixture_bin, &uppity_bin);
     int in[2], out[2];
     if (pipe(in) < 0 || pipe(out) < 0) {
         perror("pipe");
@@ -69,10 +92,10 @@ static fixture fixture_start(const char *hostkey, int port)
         close(in[1]);
         close(out[0]);
         if (port)
-            execl(SPB_SSH_FIXTURE, SPB_SSH_FIXTURE, SPB_UPPITY, key, workdir,
+            execl(fixture_bin, fixture_bin, uppity_bin, key, workdir,
                   "--port", portstr, (char *)NULL);
         else
-            execl(SPB_SSH_FIXTURE, SPB_SSH_FIXTURE, SPB_UPPITY, key, workdir,
+            execl(fixture_bin, fixture_bin, uppity_bin, key, workdir,
                   (char *)NULL);
         _exit(127);
     }
