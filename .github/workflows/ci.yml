@@ -1,6 +1,7 @@
 # Every automated check (scripts/test-all.sh --clean) on Apple Silicon and
 # Intel, so that each architecture's slice of the core is actually run,
-# not just built (docs/TESTING.md, risk R-8).
+# not just built (docs/TESTING.md, risk R-8). Each stage is its own step,
+# so a failure or hang shows where it happened.
 
 name: CI
 
@@ -26,7 +27,7 @@ jobs:
           - arch: x86_64
             runner: macos-26-intel
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
@@ -43,17 +44,42 @@ jobs:
           ninja --version
           test "$(uname -m)" = "${{ matrix.arch }}"
 
-      - name: scripts/test-all.sh --clean
+      - name: C core and C tests (plain, leaks, ASan+UBSan, TSan)
+        timeout-minutes: 60
         run: |
           set -o pipefail
-          scripts/test-all.sh --clean 2>&1 | tee test-all.log
+          scripts/test-all.sh --clean --stage core 2>&1 | tee -a test-all.log
+
+      - name: Swift tests
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --stage swift 2>&1 | tee -a test-all.log
+
+      - name: Swift tests (AddressSanitizer)
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --stage swift-asan 2>&1 | tee -a test-all.log
+
+      - name: Swift tests (ThreadSanitizer)
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --stage swift-tsan 2>&1 | tee -a test-all.log
+
+      - name: App builds (Debug, universal Release)
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --stage app 2>&1 | tee -a test-all.log
 
       - name: Report failures
-        if: failure()
+        if: failure() || cancelled()
         run: |
           # Surface failing checks as annotations (readable without logs).
-          grep -E "CHECK failed|expected .* got|✘|error:|\*\*\*Failed|ERROR: (Address|Thread)Sanitizer|WARNING: ThreadSanitizer|[1-9][0-9]* leaks for" test-all.log \
-            | grep -v "spr_get_error_message" | head -40 \
+          grep -E "CHECK failed|expected .* got|✘|error:|\*\*\*Failed|\*\*\*Timeout|ERROR: (Address|Thread)Sanitizer|WARNING: ThreadSanitizer|[1-9][0-9]* leaks for|^== |^==== " test-all.log \
+            | grep -v "spr_get_error_message" | tail -40 \
             | while IFS= read -r line; do echo "::error::${line}"; done || true
 
       - name: Upload log

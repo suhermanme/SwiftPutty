@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import PuTTYBridge
+import SessionLayer
 
 /// One state directory per test process; the core is process-wide and
 /// cannot be re-initialised after shutdown, so tests never shut it down
@@ -19,7 +20,9 @@ enum TestCore {
 /// Every test runs serially, in one root suite: many assert on
 /// process-wide state (live sessions, live settings objects, watched
 /// descriptors, core loop iterations) that parallel tests would perturb.
-@Suite("SwiftPuttyKit", .serialized)
+/// Each test also has a time limit, so a hang fails the test (and CI says
+/// which) instead of stalling the run.
+@Suite("SwiftPuttyKit", .serialized, .timeLimit(.minutes(3)))
 enum KitTests {}
 
 
@@ -89,4 +92,17 @@ func rawSettings(host: String = "127.0.0.1", port: UInt16) -> PuTTYSettings {
     settings["HostName"] = host
     settings["PortNumber"] = String(port)
     return settings
+}
+
+extension SessionController {
+    /// ``waitForState(_:)`` with a time limit: returns the state reached,
+    /// which is not `target` if the time ran out.
+    func waitForState(_ target: PuTTYSessionState,
+                      within timeout: Duration) async -> PuTTYSessionState {
+        let deadline = ContinuousClock.now + timeout
+        while state < target && !state.isFinal && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return state
+    }
 }

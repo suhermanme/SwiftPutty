@@ -78,7 +78,7 @@ lipo -info "$UNIVERSAL/libSwiftPuttyCore.a"
 
 if [[ $RUN_TESTS == 1 ]]; then
     echo "== C bridge tests ($HOST_ARCH)"
-    (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure)
+    (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
     for test in spb_bridge_test spb_session_test spb_terminal_test \
                 spb_ssh_test; do
         echo "== $test under leaks --atExit ($HOST_ARCH)"
@@ -94,7 +94,7 @@ if [[ $RUN_ASAN == 1 ]]; then
     configure_and_build "$BUILD/core-asan-$HOST_ARCH" "$HOST_ARCH" Debug \
         -DCMAKE_C_FLAGS="$SAN_FLAGS" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-    (cd "$BUILD/core-asan-$HOST_ARCH" && ctest --output-on-failure)
+    (cd "$BUILD/core-asan-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
 fi
 
 if [[ $RUN_TSAN == 1 ]]; then
@@ -103,5 +103,5 @@ if [[ $RUN_TSAN == 1 ]]; then
         -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
     (cd "$BUILD/core-tsan-$HOST_ARCH" \
-        && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure)
+        && TSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure --timeout 600)
 fi

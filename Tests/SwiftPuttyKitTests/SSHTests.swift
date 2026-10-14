@@ -91,7 +91,7 @@ extension KitTests {
             ssh.typeLine("stoat")
             #expect(await ssh.waitForScreen("Silent prompt:"))
             ssh.typeLine("weasel")
-            #expect(await ssh.controller.waitForState(.connected) == .connected)
+            #expect(await ssh.controller.waitForState(.connected, within: .seconds(30)) == .connected)
             #expect(!ssh.screenText.contains("weasel"))
 
             ssh.typeLine("echo answer-$((6*7))")
@@ -103,7 +103,7 @@ extension KitTests {
             #expect(await ssh.waitForScreen("\n30 90"))
 
             ssh.typeLine("exit 0")
-            #expect(await ssh.controller.waitForState(.closed) == .closed)
+            #expect(await ssh.controller.waitForState(.closed, within: .seconds(30)) == .closed)
             // uppity reports 127 when its pty reaches EOF before it has
             // reaped the shell (unix/pty.c, EXITTYPE_WEIRD): a race in the
             // test server, not in the client, which reports what it is
@@ -120,7 +120,7 @@ extension KitTests {
             #expect(await ssh.waitForScreen("Using username \"tester\"."))
             #expect(await ssh.waitForScreen("tester@127.0.0.1's password:"))
             ssh.typeLine("weasel")
-            #expect(await ssh.controller.waitForState(.connected) == .connected)
+            #expect(await ssh.controller.waitForState(.connected, within: .seconds(30)) == .connected)
         }
 
         @Test func cancellingTheHostKeyEndsTheSession() async throws {
@@ -128,7 +128,7 @@ extension KitTests {
             defer { ssh.close() }
             let prompt = try #require(await ssh.waitForPrompt())
             ssh.controller.answer(prompt, with: .cancel)
-            let state = await ssh.controller.waitForState(.closed)
+            let state = await ssh.controller.waitForState(.closed, within: .seconds(30))
             #expect(state.isFinal)
             #expect(ssh.controller.pendingPrompt == nil)
         }

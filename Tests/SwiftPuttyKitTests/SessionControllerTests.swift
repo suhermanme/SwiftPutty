@@ -34,7 +34,7 @@ struct SessionControllerTests {
         let controller = rawController(port: server.port)
         #expect(controller.state == .created)
         try controller.connect()
-        #expect(await controller.waitForState(.connected) == .connected)
+        #expect(await controller.waitForState(.connected, within: .seconds(30)) == .connected)
         #expect(controller.sessionID != nil)
 
         controller.send("ping\n")
@@ -44,7 +44,7 @@ struct SessionControllerTests {
         #expect(!controller.eventLog.isEmpty)
 
         controller.close()
-        #expect(await controller.waitForState(.closed) == .closed)
+        #expect(await controller.waitForState(.closed, within: .seconds(30)) == .closed)
         #expect(controller.stateDetail == "Session closed by user")
         #expect(controller.exitCode == nil)
     }
@@ -55,7 +55,7 @@ struct SessionControllerTests {
 
         let controller = rawController(port: server.port)
         try controller.connect()
-        #expect(await controller.waitForState(.closed) == .closed)
+        #expect(await controller.waitForState(.closed, within: .seconds(30)) == .closed)
         #expect(controller.exitCode == 0)
         #expect(String(decoding: controller.transcript, as: UTF8.self) == "goodbye\n")
     }
@@ -63,7 +63,7 @@ struct SessionControllerTests {
     @Test func failureIsReportedWithDetail() async throws {
         let controller = rawController(port: try LoopbackServer.unusedPort())
         try controller.connect()
-        #expect(await controller.waitForState(.connected) == .failed)
+        #expect(await controller.waitForState(.connected, within: .seconds(30)) == .failed)
         #expect(controller.stateDetail?.contains("refused") == true)
     }
 
@@ -72,7 +72,7 @@ struct SessionControllerTests {
         defer { server.stop() }
         let controller = rawController(port: server.port)
         try controller.connect()
-        #expect(await controller.waitForState(.connected) == .connected)
+        #expect(await controller.waitForState(.connected, within: .seconds(30)) == .connected)
 
         let chunk = Data(repeating: 0x41, count: 256 << 10)
         for _ in 0..<6 { controller.send(chunk) }
@@ -87,7 +87,7 @@ struct SessionControllerTests {
         defer { server.stop() }
         var controller: SessionController? = rawController(port: server.port)
         try controller!.connect()
-        #expect(await controller!.waitForState(.connected) == .connected)
+        #expect(await controller!.waitForState(.connected, within: .seconds(30)) == .connected)
         controller = nil
         #expect(await waitUntil {
             PuTTYCore.waitForPendingWork() && PuTTYCore.liveSessionCount == 0
