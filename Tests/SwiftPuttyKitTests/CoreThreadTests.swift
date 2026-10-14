@@ -63,9 +63,16 @@ extension KitTests {
             session.start()
             #expect(await collector.wait(for: .closed))
             #expect(String(decoding: collector.output, as: UTF8.self) == "bye\n")
-            let tail = collector.events.suffix(2)
-            #expect(tail.first == .remoteExit(code: 0))
-            #expect(collector.states.last == .closed)
+            // Session events, without the terminal's (title, frames), which
+            // may interleave: the exit code comes just before CLOSED.
+            let sessionEvents = collector.events.filter {
+                switch $0 {
+                case .stateChanged, .remoteExit: true
+                default: false
+                }
+            }
+            #expect(sessionEvents.suffix(2) == [.remoteExit(code: 0),
+                                                .stateChanged(.closed, detail: "Connection closed by remote host")])
         }
 
         @Test func refusedConnectionFails() async throws {
