@@ -1,0 +1,65 @@
+# Every automated check (scripts/test-all.sh --clean) on Apple Silicon and
+# Intel, so that each architecture's slice of the core is actually run,
+# not just built (docs/TESTING.md, risk R-8).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test-all (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          uname -m
+          sw_vers
+          xcodebuild -version
+          swift --version
+          cmake --version | head -1
+          ninja --version
+          test "$(uname -m)" = "${{ matrix.arch }}"
+
+      - name: scripts/test-all.sh --clean
+        run: |
+          set -o pipefail
+          scripts/test-all.sh --clean 2>&1 | tee test-all.log
+
+      - name: Report failures
+        if: failure()
+        run: |
+          # Surface failing checks as annotations (readable without logs).
+          grep -E "CHECK failed|expected .* got|✘|error:|\*\*\*Failed|ERROR: (Address|Thread)Sanitizer|WARNING: ThreadSanitizer|[1-9][0-9]* leaks for" test-all.log \
+            | grep -v "spr_get_error_message" | head -40 \
+            | while IFS= read -r line; do echo "::error::${line}"; done || true
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-all-${{ matrix.arch }}
+          path: test-all.log
+          if-no-files-found: ignore
