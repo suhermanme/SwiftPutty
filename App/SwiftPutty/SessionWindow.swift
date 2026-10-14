@@ -3,51 +3,27 @@ import SessionLayer
 import SwiftUI
 import TerminalUI
 
-/// What a session window connects to. Until saved sessions and the
-/// configuration dialog exist (M05), the launcher sets only these.
+/// What a session window connects to: the settings from the
+/// configuration dialog, as PuTTY will use them (`prepare_session`).
 struct SessionRequest: Codable, Hashable {
-    /// PuTTY's `Protocol` keywords for the connection types available.
-    enum ConnectionType: String, Codable, CaseIterable {
-        case ssh, raw
-
-        var label: String {
-            switch self {
-            case .ssh: "SSH"
-            case .raw: "Raw"
-            }
-        }
-
-        /// As PuTTY's configuration dialog: choosing a type sets its port.
-        var defaultPort: Int {
-            switch self {
-            case .ssh: 22
-            case .raw: 23
-            }
-        }
-    }
-
     var id = UUID()
     /// The launch that opened this window. SwiftUI restores windows with
     /// their values at the next launch; PuTTY never reconnects by itself,
     /// so windows from an earlier launch close instead of connecting.
     var launch = SessionRequest.currentLaunch
-    var connectionType = ConnectionType.ssh
-    var host: String
-    var port: Int
-    /// Empty: PuTTY asks "login as:" in the terminal.
-    var userName = ""
+    var settings: PuTTYSettings
+
+    init(settings: PuTTYSettings) {
+        self.settings = settings.preparedForSession()
+    }
 
     static let currentLaunch = UUID()
 
     var isFromThisLaunch: Bool { launch == Self.currentLaunch }
 
-    var settings: PuTTYSettings {
-        var settings = PuTTYSettings.defaults()
-        settings["Protocol"] = connectionType.rawValue
-        settings["HostName"] = host
-        settings["PortNumber"] = String(port)
-        settings["UserName"] = userName
-        return settings
+    /// PuTTY's `conf_dest`: the host, or the serial line.
+    var destination: String {
+        settings["Protocol"] == "serial" ? settings["SerialLine"] ?? "" : settings["HostName"] ?? ""
     }
 }
 
@@ -91,13 +67,20 @@ struct SessionWindow: View {
             }
     }
 
-    /// As PuTTY: the terminal's title, else "host - PuTTY"; "(inactive)"
-    /// once the session has ended.
+    /// As GTK PuTTY: the title the terminal set, else the configured
+    /// window title, else "host - SwiftPutty"; "(inactive)" once the
+    /// session has ended.
     private var windowTitle: String {
         if controller.state.isFinal {
             return "SwiftPutty (inactive)"
         }
-        return controller.title.isEmpty ? "\(request.host) - SwiftPutty" : controller.title
+        if !controller.title.isEmpty {
+            return controller.title
+        }
+        if let title = request.settings["WinTitle"], !title.isEmpty {
+            return title
+        }
+        return "\(request.destination) - SwiftPutty"
     }
 
     private func connect() {

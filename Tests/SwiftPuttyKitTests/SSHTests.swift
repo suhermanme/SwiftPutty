@@ -180,5 +180,17 @@ extension KitTests {
             #expect(p.buttons.map(\.label) == ["Yes", "No"])
             #expect(p.buttons.map(\.answer) == [.acceptOnce, .cancel])
         }
+
+        @Test func logFileQuestionHasGTKsButtons() {
+            let p = PuTTYPromptPresentation(PuTTYPrompt(id: 4, kind: .logFileExists, items: [
+                .init(style: .title, text: "SwiftPutty Log to File"),
+                .init(style: .paragraph, text: "The session log file \"putty.log\" already exists."),
+            ]))
+            #expect(p.title == "SwiftPutty Log to File")
+            #expect(p.blocks == [.paragraph("The session log file \"putty.log\" already exists.")])
+            #expect(p.buttons.map(\.label) == ["Overwrite", "Append", "Disable"])
+            #expect(p.buttons.map(\.answer) == [.overwriteLog, .appendToLog, .cancel])
+            #expect(p.buttons.map(\.isDefault) == [true, false, false])
+        }
     }
 }

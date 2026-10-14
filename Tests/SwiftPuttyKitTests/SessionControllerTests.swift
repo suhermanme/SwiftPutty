@@ -82,6 +82,44 @@ struct SessionControllerTests {
         #expect(controller.transcript.count == SessionController.transcriptLimit)
     }
 
+    /// The log file question (PuTTY's askappend) arrives as a prompt,
+    /// and outlives the connection.
+    @Test func asksAboutAnExistingLogFile() async throws {
+        let server = try LoopbackServer(.echo)
+        defer { server.stop() }
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "SwiftPuttyLog-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appending(path: "session.log")
+        try Data("old\n".utf8).write(to: log)
+
+        var settings = rawSettings(port: server.port)
+        settings["LogType"] = "2"                  // all session output
+        settings["LogFileName"] = log.path
+        settings["LogFileClash"] = "-1"            // ask
+        settings["LogHeader"] = "0"
+        var controller: SessionController? = SessionController(settings: settings)
+        try controller!.connect()
+        #expect(await controller!.waitForState(.connected, within: .seconds(30)) == .connected)
+        controller!.send("ping\n")
+        #expect(await waitUntil { controller!.pendingPrompt != nil })
+        let prompt = try #require(controller!.pendingPrompt)
+        #expect(prompt.kind == .logFileExists)
+        #expect(prompt.title == "SwiftPutty Log to File")
+
+        controller!.close()
+        #expect(await controller!.waitForState(.closed, within: .seconds(30)) == .closed)
+        #expect(controller!.pendingPrompt == prompt)
+        controller!.answer(prompt, with: .appendToLog)
+        #expect(controller!.pendingPrompts.isEmpty)
+        #expect(await waitUntil { controller!.eventLog.contains { $0.hasPrefix("Appending session log") } })
+
+        controller = nil                           // closes the log file
+        #expect(await waitUntil { PuTTYCore.waitForPendingWork() && PuTTYCore.liveSessionCount == 0 })
+        #expect(try String(contentsOf: log, encoding: .utf8) == "old\nping\n")
+    }
+
     @Test func droppingTheControllerReleasesTheSession() async throws {
         let server = try LoopbackServer(.echo)
         defer { server.stop() }

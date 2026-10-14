@@ -10,6 +10,8 @@
 		5A0000000000000000000101 /* PuTTYBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000701 /* PuTTYBridge */; };
 		5A0000000000000000000102 /* SessionLayer in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000702 /* SessionLayer */; };
 		5A0000000000000000000103 /* TerminalUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000703 /* TerminalUI */; };
+		5A0000000000000000000104 /* Persistence in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000704 /* Persistence */; };
+		5A0000000000000000000105 /* ConfigurationUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000705 /* ConfigurationUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +34,8 @@
 				5A0000000000000000000101 /* PuTTYBridge in Frameworks */,
 				5A0000000000000000000102 /* SessionLayer in Frameworks */,
 				5A0000000000000000000103 /* TerminalUI in Frameworks */,
+				5A0000000000000000000104 /* Persistence in Frameworks */,
+				5A0000000000000000000105 /* ConfigurationUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +82,8 @@
 				5A0000000000000000000701 /* PuTTYBridge */,
 				5A0000000000000000000702 /* SessionLayer */,
 				5A0000000000000000000703 /* TerminalUI */,
+				5A0000000000000000000704 /* Persistence */,
+				5A0000000000000000000705 /* ConfigurationUI */,
 			);
 			productName = SwiftPutty;
 			productReference = 5A0000000000000000000201 /* SwiftPutty.app */;
@@ -299,6 +305,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
 			productName = TerminalUI;
+		};
+		5A0000000000000000000704 /* Persistence */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
+			productName = Persistence;
+		};
+		5A0000000000000000000705 /* ConfigurationUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5A0000000000000000000C01 /* XCLocalSwiftPackageReference ".." */;
+			productName = ConfigurationUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -755,7 +755,7 @@ Settings (as Windows hides them). It never silently reconnects.
 
 ## 10. Repository layout
 
-As of M03 (directories marked *planned* do not exist yet):
+As of M05:
 
 ```
 swift_putty/
@@ -765,10 +765,11 @@ swift_putty/
 │   └── SwiftPutty/                SwiftUI app sources (folder-synchronised group)
 ├── Sources/
 │   ├── PuTTYBridge/               Swift wrapper; the only consumer of PuTTYBridge.h
-│   ├── SessionLayer/              SessionController (M02); configuration, diff (M05/M07)
+│   ├── SessionLayer/              SessionController (M02); configuration diff (M07)
 │   ├── TestServers/               test-only loopback TCP servers (not a product)
 │   ├── TerminalUI/                TerminalView (AppKit), renderer, key mapping, font (M03)
-│   └── Persistence/               planned (M05): saved sessions (versioned Codable)
+│   ├── Persistence/               SavedSessionStore: saved sessions, versioned JSON (M05, D-027)
+│   └── ConfigurationUI/           PuTTY's configuration dialog: model + SwiftUI panels (M05, D-028)
 ├── Tests/SwiftPuttyKitTests/      Swift tests (swift test; one serialized root suite)
 ├── Core/                          C side of the bridge
 │   ├── include/                   PuTTYBridge.h + module.modulemap (module PuTTYBridgeC)
@@ -831,6 +832,14 @@ M04 (API v4) enables SSH (D-024). Instead of the §7 proposal's separate
 - `AUTHENTICATING` is not a separate state: a session is `CONNECTING`
   until the backend accepts input (D-018), which for SSH is after
   authentication and channel setup.
+
+M05 (API v5, D-029) adds the log file question
+(`SPB_PROMPT_LOG_FILE_EXISTS`, answers `SPB_ANSWER_LOG_OVERWRITE` /
+`SPB_ANSWER_LOG_APPEND` / `SPB_ANSWER_CANCEL`) in a second dialog slot per
+session, kept until release; and `spb_settings_prepare_session`
+(upstream `prepare_session`), which `spb_session_create` now applies as
+GTK PuTTY's `new_session_window` does. Saved sessions stay on the Swift
+side (D-027); the core still never opens a session by name.
 
 ## 11. Risks and open questions
 

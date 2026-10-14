@@ -6,7 +6,7 @@ import PuTTYBridgeC
 ///
 /// Conversion to and from PuTTY's internal configuration happens in C,
 /// through upstream's own load/save code (docs/DECISIONS.md D-004).
-public struct PuTTYSettings: Equatable, Sendable {
+public struct PuTTYSettings: Hashable, Sendable, Codable {
     public var values: [String: String]
 
     public init(values: [String: String] = [:]) {
@@ -37,6 +37,27 @@ public struct PuTTYSettings: Equatable, Sendable {
             spb_settings_normalise(handle)
             return PuTTYSettings(handle: handle)
         }
+    }
+
+    /// These settings as PuTTY will use them to connect (upstream
+    /// `prepare_session`): a `user@` prefix on the host name becomes the
+    /// user name, a single `:suffix` is dropped, whitespace is removed.
+    /// Sessions do this themselves; use it to show the destination.
+    public func preparedForSession() -> PuTTYSettings {
+        withBridgeHandle { handle in
+            spb_settings_prepare_session(handle)
+            return PuTTYSettings(handle: handle)
+        }
+    }
+
+    // A keyword map, encoded as a plain JSON object.
+    public init(from decoder: any Decoder) throws {
+        values = try decoder.singleValueContainer().decode([String: String].self)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(values)
     }
 
     init(handle: OpaquePointer) {

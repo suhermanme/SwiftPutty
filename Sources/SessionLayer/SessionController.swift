@@ -45,9 +45,11 @@ public final class SessionController {
     public private(set) var title = ""
     /// Icon title set by the terminal.
     public private(set) var iconTitle = ""
-    /// A dialog PuTTY is waiting on (host key, weak crypto): show it and
-    /// call ``answer(_:with:)``.
-    public private(set) var pendingPrompt: PuTTYPrompt?
+    /// Dialogs PuTTY is waiting on, oldest first: at most one about the
+    /// connection (host key, weak crypto) and one about the log file.
+    public private(set) var pendingPrompts: [PuTTYPrompt] = []
+    /// The dialog to show now: show it and call ``answer(_:with:)``.
+    public var pendingPrompt: PuTTYPrompt? { pendingPrompts.first }
 
     /// Process-unique identifier of the running session, once started.
     public var sessionID: UInt64? { session?.id }
@@ -101,10 +103,10 @@ public final class SessionController {
         session?.sendEOF()
     }
 
-    /// Answers the pending prompt.
+    /// Answers a pending prompt.
     public func answer(_ prompt: PuTTYPrompt, with answer: PuTTYPrompt.Answer) {
-        guard pendingPrompt?.id == prompt.id else { return }
-        pendingPrompt = nil
+        guard let index = pendingPrompts.firstIndex(where: { $0.id == prompt.id }) else { return }
+        pendingPrompts.remove(at: index)
         session?.answer(prompt, with: answer)
     }
 
@@ -157,9 +159,11 @@ public final class SessionController {
         case .resizeRequested(let columns, let rows):
             terminalDelegate?.terminal(self, requestsResizeTo: columns, rows: rows)
         case .prompt(let prompt):
-            pendingPrompt = prompt
+            // A new question of a kind replaces the old one, as in PuTTY.
+            pendingPrompts.removeAll { ($0.kind == .logFileExists) == (prompt.kind == .logFileExists) }
+            pendingPrompts.append(prompt)
         case .promptCancelled(let id):
-            if pendingPrompt?.id == id { pendingPrompt = nil }
+            pendingPrompts.removeAll { $0.id == id }
         }
     }
 }

@@ -69,7 +69,10 @@ struct spb_session {
     spb_session_state state;
     bool exited;                       /* connection gone or going */
 
-    struct spb_pending_prompt *prompt; /* dialog awaiting an answer */
+    /* Dialogs awaiting an answer, one per slot as GTK PuTTY has them:
+     * the connection's (host key, weak crypto) and the log file's. */
+    struct spb_pending_prompt *prompt;
+    struct spb_pending_prompt *log_prompt;
 
     bool active;                       /* in the active-session list */
     spb_session *active_next, *active_prev;
@@ -91,8 +94,11 @@ void spb_session_connection_fatal(spb_session *s, const char *message);
 
 /* spb_seat.c: the session's Seat and LogPolicy */
 void spb_seat_init(spb_session *s);
-/* Forget a pending dialog without answering (the connection is gone). */
+/* Forget the connection's pending dialog without answering (the
+ * connection is gone). */
 void spb_seat_cancel_prompt(spb_session *s);
+/* Forget the log file dialog (the session is being released). */
+void spb_seat_cancel_log_prompt(spb_session *s);
 
 /* spb_terminal.c */
 struct spb_screen *spb_screen_new(void);         /* any thread */

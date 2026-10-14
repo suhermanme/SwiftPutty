@@ -11,10 +11,10 @@ struct SwiftPuttyApp: App {
     }
 
     var body: some Scene {
-        // The launcher window. In PuTTY the configuration dialog is the
-        // entry point and each session gets its own terminal window.
-        Window("SwiftPutty", id: WindowID.launcher) {
-            LauncherView(model: appDelegate.model)
+        // As in PuTTY, the configuration dialog is the entry point and
+        // each session gets its own terminal window.
+        Window("SwiftPutty Configuration", id: WindowID.configuration) {
+            ConfigurationWindow(appModel: appDelegate.model)
         }
         .windowResizability(.contentSize)
         .commands {
@@ -47,7 +47,7 @@ private struct ClosingWindow: View {
 }
 
 enum WindowID {
-    static let launcher = "launcher"
+    static let configuration = "configuration"
     static let about = "about"
     static let session = "session"
 }
@@ -61,9 +61,13 @@ private struct AppCommands: Commands {
                 openWindow(id: WindowID.about)
             }
         }
-        // No document-style "New Window"; File > New Session arrives with
-        // the session launcher (M05).
-        CommandGroup(replacing: .newItem) {}
+        // PuTTY's "New Session...": the configuration dialog.
+        CommandGroup(replacing: .newItem) {
+            Button("New Session…") {
+                openWindow(id: WindowID.configuration)
+            }
+            .keyboardShortcut("n")
+        }
         CommandGroup(after: .pasteboard) {
             Button("Copy All to Clipboard") {
                 NSApp.sendAction(#selector(TerminalView.copyAllToClipboard(_:)), to: nil, from: nil)

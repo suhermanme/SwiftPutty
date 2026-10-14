@@ -74,6 +74,13 @@ public struct PuTTYPromptPresentation: Equatable {
                 Button(label: "Yes", answer: .acceptOnce, isCancel: false, isDefault: false),
                 Button(label: "No", answer: .cancel, isCancel: true, isDefault: true),
             ]
+        case .logFileExists:
+            // unix/dialog.c gtkdlg_askappend
+            buttons = [
+                Button(label: "Overwrite", answer: .overwriteLog, isCancel: false, isDefault: true),
+                Button(label: "Append", answer: .appendToLog, isCancel: false, isDefault: false),
+                Button(label: "Disable", answer: .cancel, isCancel: true, isDefault: false),
+            ]
         }
     }
 }
@@ -93,10 +100,7 @@ public struct PuTTYPromptView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: prompt.isWarning ? "exclamationmark.octagon.fill"
-                                                   : "exclamationmark.triangle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(prompt.isWarning ? .red : .yellow)
+                icon
                 Text(presentation.title)
                     .font(.headline)
                     .padding(.top, 6)
@@ -136,6 +140,21 @@ public struct PuTTYPromptView: View {
         }
         .padding(20)
         .frame(width: 520)
+    }
+
+    /// A question about the log file is not a security matter.
+    @ViewBuilder
+    private var icon: some View {
+        if prompt.kind == .logFileExists {
+            Image(systemName: "questionmark.circle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
+        } else {
+            Image(systemName: prompt.isWarning ? "exclamationmark.octagon.fill"
+                                               : "exclamationmark.triangle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(prompt.isWarning ? .red : .yellow)
+        }
     }
 
     @ViewBuilder

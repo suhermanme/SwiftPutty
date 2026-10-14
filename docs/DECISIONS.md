@@ -425,3 +425,71 @@ macOS asks the user once.
 connection to a LAN host shows the system's Local Network permission
 prompt.
 
+
+## D-027 — Saved sessions: one versioned JSON file, PuTTY's rules
+
+**Status:** Accepted (M05); implements D-004's persistence
+**Context:** PuTTY keeps sessions in the registry (Windows) or one file
+per session (`~/.putty/sessions`, Unix). SwiftPutty's core never opens a
+session by name (`spb_storage.c`); the Swift side owns them.
+**Decision:** `Persistence.SavedSessionStore` keeps every session in
+`~/Library/Application Support/SwiftPutty/Saved Sessions.json`:
+`{"format": "org.swiftputty.saved-sessions", "version": 1, "sessions":
+{name: {PuTTY keyword: value}}}`, values encoded as PuTTY's Unix files
+encode them, keys sorted (deterministic output). Each call reads the file
+afresh (as PuTTY reads its storage). Each change writes a new file
+created with mode 0600 (sessions can hold proxy passwords) in a 0700
+directory, synced, then renamed over the old one. A file with a newer
+version, or one that cannot be read, is reported and never overwritten.
+Older versions will be migrated in place on read when a version 2
+exists. PuTTY's rules apply unchanged: "Default Settings" is always
+listed first; other names sort by `strcmp`; an empty name means "Default
+Settings"; a missing session loads as built-in defaults; sessions are
+saved normalised (every keyword).
+**Consequences:** A session is a PuTTY keyword map, so importing PuTTY's
+Unix session files later is a format conversion. One damaged file
+affects all sessions, but it is never destroyed automatically.
+
+## D-028 — The configuration dialog is native, panel by panel
+
+**Status:** Accepted (M05)
+**Context:** PuTTY describes its dialog portably (`config.c`
+`setup_config_box`, handlers driven through `dlg_*` calls), and each
+frontend renders it. Rendering that control box from Swift would mean
+implementing the `dlg_*` API across the core thread for synchronous
+handlers, file and font selectors and colour pickers.
+**Decision:** SwiftUI panels (`ConfigurationUI`) edit the keyword map
+directly, following `setup_config_box` for wording, order and saved
+values. The logic of the handlers that are more than "set a keyword"
+(`sessionsaver_handler`, `config_protocols_handler`,
+`config_port_handler`, keepalive minutes/seconds) is mirrored in
+`ConfigurationModel` and unit-tested. Panels use `PuTTYKeyword`, which a
+test checks against PuTTY's saved keywords. A control appears only when
+SwiftPutty implements its effect; categories are added by the milestones
+that implement them (M06 terminal, M09 SSH, M12 the rest). Open, Cancel
+and About follow PuTTY; Open closes the dialog; File > New Session…
+reopens it, starting from "Default Settings".
+**Consequences:** Native controls and no core-thread round trips while
+editing. The parity table (CONFIGURATION_PARITY.md) is the checklist that
+keeps the panels in step with upstream; an upstream update must be
+diffed against `config.c`.
+
+## D-029 — The log file question has its own dialog slot; `prepare_session` in the bridge
+
+**Status:** Accepted (M05); extends D-024 (API v5)
+**Context:** With "Ask the user every time" (PuTTY's default), the log
+file opens on the first logged byte, which can be while the host key
+dialog is up. GTK PuTTY keeps dialogs in slots, so the two coexist.
+Separately, GTK PuTTY applies `prepare_session` (user@host, `:suffix`,
+whitespace) before connecting; the bridge did not.
+**Decision:** `SPB_PROMPT_LOG_FILE_EXISTS` uses the same prompt callback
+with a second slot per session, answers `SPB_ANSWER_LOG_OVERWRITE`,
+`SPB_ANSWER_LOG_APPEND` or `SPB_ANSWER_CANCEL` (GTK's Overwrite / Append /
+Disable). Log data is queued by upstream while it is open. It survives
+the end of the connection and is withdrawn only at release.
+`SessionController` holds pending prompts in order. `spb_session_create`
+calls `prepare_session`; `spb_settings_prepare_session` exposes it so the
+frontend shows the destination as PuTTY uses it.
+**Consequences:** Logging works with PuTTY's default settings. A host
+key dialog and a log question can both be pending; the window shows them
+one after the other.

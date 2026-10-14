@@ -165,6 +165,15 @@ void spb_settings_save_from_conf(spb_settings *settings, Conf *conf)
     close_settings_w(writer);
 }
 
+void spb_settings_prepare_session(spb_settings *settings)
+{
+    Conf *conf = conf_new();
+    spb_settings_load_into_conf(settings, conf);
+    prepare_session(conf);
+    spb_settings_save_from_conf(settings, conf);
+    conf_free(conf);
+}
+
 void spb_settings_normalise(spb_settings *settings)
 {
     Conf *conf = conf_new();

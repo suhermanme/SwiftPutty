@@ -74,9 +74,9 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case promptCancelled(id: UInt64)
 }
 
-/// A question PuTTY asks in a dialog box: host key confirmation, or a
-/// weak-cryptography warning. The text is PuTTY's own, structured as
-/// upstream's `SeatDialogText`.
+/// A question PuTTY asks in a dialog box: host key confirmation, a
+/// weak-cryptography warning, or what to do with an existing log file.
+/// The text is PuTTY's own, structured as upstream's `SeatDialogText`.
 public struct PuTTYPrompt: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Equatable {
         /// Unknown or changed host key. Answers: ``Answer/acceptAndStore``
@@ -88,10 +88,16 @@ public struct PuTTYPrompt: Sendable, Equatable, Identifiable {
         /// The cached host key's type is below the warning threshold.
         /// Answers as for ``weakCrypto``.
         case weakCachedHostKey
+        /// The session log file exists and the settings say to ask.
+        /// Answers: ``Answer/overwriteLog``, ``Answer/appendToLog``,
+        /// ``Answer/cancel`` ("Disable"). Asked independently of the
+        /// connection's dialogs, and kept when the connection ends.
+        case logFileExists
     }
 
     public enum Answer: Sendable {
         case cancel, acceptOnce, acceptAndStore
+        case overwriteLog, appendToLog
     }
 
     public struct Item: Sendable, Equatable {
@@ -136,6 +142,7 @@ public struct PuTTYPrompt: Sendable, Equatable, Identifiable {
         kind = switch p.kind {
         case SPB_PROMPT_WEAK_CRYPTO: .weakCrypto
         case SPB_PROMPT_WEAK_CACHED_HOST_KEY: .weakCachedHostKey
+        case SPB_PROMPT_LOG_FILE_EXISTS: .logFileExists
         default: .hostKey
         }
         items = (0..<p.n_items).map { index in
@@ -303,6 +310,8 @@ public final class PuTTYSession: Sendable {
         case .cancel: SPB_ANSWER_CANCEL
         case .acceptOnce: SPB_ANSWER_ACCEPT_ONCE
         case .acceptAndStore: SPB_ANSWER_ACCEPT_AND_STORE
+        case .overwriteLog: SPB_ANSWER_LOG_OVERWRITE
+        case .appendToLog: SPB_ANSWER_LOG_APPEND
         }
         spb_session_answer_prompt(handle, prompt.id, value)
     }

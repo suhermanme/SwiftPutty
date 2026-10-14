@@ -19,44 +19,48 @@ reconfigure handlers (`term_reconfig`, `ldisc_configure`, `log_reconfig`,
   a new session; SwiftPutty never reconnects silently.
 - **unsupported** — no macOS equivalent.
 
-Every row is NOT STARTED as of M00. "macOS implementation" is the *planned*
-mapping. `CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
+Every row was NOT STARTED at M00; M05 added the configuration dialog
+(D-028). COMPLETE rows are done; PARTIAL rows can be set before
+connecting and take effect then, but cannot yet be changed in a running
+session (Change Settings, M07), or are otherwise limited as noted. For
+NOT STARTED rows, "macOS implementation" is the *planned* mapping.
+`CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
 
 ## Session
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Host Name / IP (`CONF_host`) | Session launcher text field | NOT STARTED | reconnect | |
-| Port (`CONF_port`) | Session launcher | NOT STARTED | reconnect | Default depends on protocol (load_custom) |
-| Connection type (`CONF_protocol`) | Popup: SSH, Serial, Other (Telnet/Rlogin/SUPDUP/Raw) | NOT STARTED | reconnect | Other backends in M11 |
-| Saved Sessions list / Load / Save / Delete | Sidebar list; Load/Save/Delete; Default Settings entry | NOT STARTED | Save: runtime (mid-session "Save the current session settings"); Load/Delete: reconnect (hidden) | Versioned Codable store, not the registry |
-| Close window on exit (`CONF_close_on_exit`) | Popup Always/Never/Only on clean exit | NOT STARTED | runtime | Read by the frontend at exit |
+| Host Name / IP (`CONF_host`) | Session panel edit box; upstream `prepare_session` applied at connect (user@, :suffix) | COMPLETE | reconnect |  |
+| Port (`CONF_port`) | Session panel edit box (0 shown blank) | COMPLETE | reconnect | Default depends on protocol (load_custom). Follows the protocol while it is still the old default (`config_protocols_handler`) |
+| Connection type (`CONF_protocol`) | Radio: SSH, Other: popup | PARTIAL | reconnect | M05: SSH and Raw; Serial, Telnet, Rlogin, SUPDUP in M11 |
+| Saved Sessions list / Load / Save / Delete | Session panel: name box, list (Default Settings first), Load/Save/Delete; double-click opens | PARTIAL | Save: runtime (mid-session "Save the current session settings"); Load/Delete: reconnect (hidden) | Versioned JSON store, not the registry (D-027); PuTTY's rules (`sessionsaver_handler`). M05: before connecting; mid-session Save in M07 |
+| Close window on exit (`CONF_close_on_exit`) | Radio Always/Never/Only on clean exit | PARTIAL | runtime | Read by the frontend at exit. M05: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Session → Logging
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Session logging type (`CONF_logtype`) | Radio | NOT STARTED | runtime | `log_reconfig` closes/reopens the log |
-| Log file name (`CONF_logfilename`) | NSSavePanel; `&H &Y &M &D &T &P` placeholders kept | NOT STARTED | runtime | Same |
-| If log file exists (`CONF_logxfovr`) | Radio; "Ask" uses `LogPolicy.askappend` sheet | NOT STARTED | runtime | |
-| Flush log file frequently (`CONF_logflush`) | Checkbox | NOT STARTED | runtime | |
-| Include header (`CONF_logheader`) | Checkbox | NOT STARTED | runtime | |
-| Omit known password fields (`CONF_logomitpass`) | Checkbox (SSH only) | NOT STARTED | runtime | |
-| Omit session data (`CONF_logomitdata`) | Checkbox (SSH only) | NOT STARTED | runtime | |
+| Session logging type (`CONF_logtype`) | Radio | PARTIAL | runtime | `log_reconfig` closes/reopens the log. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Log file name (`CONF_logfilename`) | Edit box + Browse… (NSSavePanel); `&H &Y &M &D &T &P` placeholders kept | PARTIAL | runtime | Same. Relative names resolve against the home directory, as Unix PuTTY. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| If log file exists (`CONF_logxfovr`) | Radio; "Ask" shows GTK's Overwrite/Append/Disable sheet (API v5, D-029) | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Flush log file frequently (`CONF_logflush`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Include header (`CONF_logheader`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Omit known password fields (`CONF_logomitpass`) | Checkbox (SSH only) | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Omit session data (`CONF_logomitdata`) | Checkbox (SSH only) | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Terminal
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Auto wrap mode initially on (`CONF_wrap_mode`) | Checkbox | NOT STARTED | runtime | `term_reconfig` also changes the *current* mode if the setting changed |
-| DEC Origin Mode initially on (`CONF_dec_om`) | Checkbox | NOT STARTED | runtime | Same |
-| Implicit CR in every LF (`CONF_lfhascr`) | Checkbox | NOT STARTED | runtime | |
-| Implicit LF in every CR (`CONF_crhaslf`) | Checkbox | NOT STARTED | runtime | |
-| Use background colour to erase screen (`CONF_bce`) | Checkbox | NOT STARTED | runtime | |
-| Enable blinking text (`CONF_blinktext`) | Checkbox | NOT STARTED | runtime | |
-| Answerback to ^E (`CONF_answerback`) | Text field | NOT STARTED | runtime | |
-| Local echo (`CONF_localecho`) | Radio Auto/Force on/Force off | NOT STARTED | runtime | `ldisc_configure` |
-| Local line editing (`CONF_localedit`) | Radio | NOT STARTED | runtime | `ldisc_configure` + `ldisc_echoedit_update` |
+| Auto wrap mode initially on (`CONF_wrap_mode`) | Checkbox | PARTIAL | runtime | `term_reconfig` also changes the *current* mode if the setting changed. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| DEC Origin Mode initially on (`CONF_dec_om`) | Checkbox | PARTIAL | runtime | Same. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Implicit CR in every LF (`CONF_lfhascr`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Implicit LF in every CR (`CONF_crhaslf`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Use background colour to erase screen (`CONF_bce`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Enable blinking text (`CONF_blinktext`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Answerback to ^E (`CONF_answerback`) | Text field | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Local echo (`CONF_localecho`) | Radio Auto/Force on/Force off | PARTIAL | runtime | `ldisc_configure`. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Local line editing (`CONF_localedit`) | Radio | PARTIAL | runtime | `ldisc_configure` + `ldisc_echoedit_update`. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Printer for ANSI printing (`CONF_printer`) | Popup of CUPS printers | NOT STARTED | runtime | `term_reconfig` aborts an active print job when cleared. Initially stubbed (`stubs/no-print.c`) |
 
 ## Terminal → Keyboard
@@ -105,22 +109,22 @@ mapping. `CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Columns / Rows (`CONF_width`, `CONF_height`) | Number fields; resizes the NSWindow | NOT STARTED | runtime | Hidden mid-session only if the backend forbids resize |
+| Columns / Rows (`CONF_width`, `CONF_height`) | Number fields; the window opens at that size | PARTIAL | runtime | Hidden mid-session only if the backend forbids resize. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | When window is resized (`CONF_resize_action`) | Radio: change rows/cols, change font size, both, forbid | NOT STARTED | runtime | |
-| Lines of scrollback (`CONF_savelines`) | Number field | NOT STARTED | runtime | `term_size` |
-| Display scrollbar (`CONF_scrollbar`) | Checkbox (NSScroller visibility) | NOT STARTED | runtime | |
+| Lines of scrollback (`CONF_savelines`) | Number field | PARTIAL | runtime | `term_size`. M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Display scrollbar (`CONF_scrollbar`) | Checkbox (NSScroller visibility) | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Display scrollbar in full screen (`CONF_scrollbar_in_fullscreen`) | Checkbox | NOT STARTED | runtime | macOS full-screen space |
-| Reset scrollback on keypress (`CONF_scroll_on_key`) | Checkbox | NOT STARTED | runtime | |
-| Reset scrollback on display activity (`CONF_scroll_on_disp`) | Checkbox | NOT STARTED | runtime | |
-| Push erased text into scrollback (`CONF_erase_to_scrollback`) | Checkbox | NOT STARTED | runtime | |
+| Reset scrollback on keypress (`CONF_scroll_on_key`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Reset scrollback on display activity (`CONF_scroll_on_disp`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Push erased text into scrollback (`CONF_erase_to_scrollback`) | Checkbox | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
 
 ## Window → Appearance
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Cursor appearance (`CONF_cursor_type`) | Radio Block/Underline/Vertical line | NOT STARTED | runtime | |
+| Cursor appearance (`CONF_cursor_type`) | Radio Block/Underline/Vertical line | PARTIAL | runtime | M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Cursor blinks (`CONF_blink_cur`) | Checkbox | NOT STARTED | runtime | |
-| Font (`CONF_font`) | NSFontPanel restricted to fixed-pitch; FontSpec ⇄ PostScript name + size | NOT STARTED | runtime | Unix FontSpec is a string; we store `"<PostScriptName> <pt>"`. Default `Menlo-Regular 12` (Windows: Courier New 10), set in M01 |
+| Font (`CONF_font`) | Font description + Change… popover: fixed-pitch family and size; stored as `"<PostScriptName> <pt>"` | PARTIAL | runtime | Unix FontSpec is a string; we store `"<PostScriptName> <pt>"`. Default `Menlo-Regular 12` (Windows: Courier New 10), set in M01. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Allow variable-pitch fonts | Checkbox (font panel filter) | NOT STARTED | runtime | UI-only in Windows too |
 | Font quality (`CONF_font_quality`) | — | NOT APPLICABLE | unsupported | ClearType/antialias options; macOS always antialiases. Kept in the model for round-trip |
 | Hide mouse pointer when typing (`CONF_hide_mouseptr`) | Checkbox (`NSCursor.setHiddenUntilMouseMoves`) | NOT STARTED | runtime | |
@@ -132,7 +136,7 @@ mapping. `CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Window title (`CONF_wintitle`) | Text field | NOT STARTED | runtime | `term_pre_reconfig` pre-fills the live title |
+| Window title (`CONF_wintitle`) | Text field | PARTIAL | runtime | `term_pre_reconfig` pre-fills the live title. M05: configuration dialog before connecting; live in Change Settings (M07). |
 | Separate window and icon titles (`CONF_win_name_always`) | Checkbox (icon title → miniaturised title) | NOT STARTED | runtime | |
 | Warn before closing window (`CONF_warn_on_close`) | Checkbox (close confirmation sheet) | NOT STARTED | runtime | |
 | Window closes on ALT-F4 (`CONF_alt_f4`) | — | NOT APPLICABLE | unsupported | ⌘W is standard |
@@ -180,21 +184,21 @@ mapping. `CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Seconds between keepalives (`CONF_ping_interval`) | Number field | NOT STARTED | runtime | `pinger_reconfig` |
-| Disable Nagle (`CONF_tcp_nodelay`) | Checkbox | NOT STARTED | reconnect | |
-| TCP keepalives (`CONF_tcp_keepalives`) | Checkbox | NOT STARTED | reconnect | |
-| Internet protocol version (`CONF_addressfamily`) | Radio Auto/IPv4/IPv6 | NOT STARTED | reconnect | |
-| Logical name of remote host (`CONF_loghost`) | Text field | NOT STARTED | reconnect | Host-key lookup name |
+| Seconds between keepalives (`CONF_ping_interval`) | Number field | PARTIAL | runtime | `pinger_reconfig`. Saved as `PingInterval` minutes + `PingIntervalSecs`, as settings.c M05: configuration dialog before connecting; live in Change Settings (M07). |
+| Disable Nagle (`CONF_tcp_nodelay`) | Checkbox | COMPLETE | reconnect |  |
+| TCP keepalives (`CONF_tcp_keepalives`) | Checkbox | COMPLETE | reconnect |  |
+| Internet protocol version (`CONF_addressfamily`) | Radio Auto/IPv4/IPv6 | COMPLETE | reconnect |  |
+| Logical name of remote host (`CONF_loghost`) | Text field | COMPLETE | reconnect | Host-key lookup name |
 | Command to run before connection (`CONF_pre_connect_command`) | — | NOT STARTED | reconnect | **Security review needed** before enabling (runs a local command) |
 
 ## Connection → Data
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Auto-login username (`CONF_username`) | Text field | NOT STARTED | reconnect | |
-| When username not specified (`CONF_username_from_env`) | Radio Prompt / Use system username | NOT STARTED | reconnect | macOS: `getpwuid` via `unix/utils/get_username.c` |
-| Terminal-type string (`CONF_termtype`) | Text field (default `xterm`) | NOT STARTED | reconnect | |
-| Terminal speeds (`CONF_termspeed`) | Text field | NOT STARTED | reconnect | |
+| Auto-login username (`CONF_username`) | Text field | COMPLETE | reconnect | A `user@` prefix on the host name overrides it (`prepare_session`) |
+| When username not specified (`CONF_username_from_env`) | Radio Prompt / Use system username | COMPLETE | reconnect | macOS: `getpwuid` via `unix/utils/get_username.c` |
+| Terminal-type string (`CONF_termtype`) | Text field (default `xterm`) | COMPLETE | reconnect |  |
+| Terminal speeds (`CONF_termspeed`) | Text field | COMPLETE | reconnect |  |
 | Environment variables (`CONF_environmt`) | Key/value table | NOT STARTED | reconnect | |
 
 ## Connection → Proxy

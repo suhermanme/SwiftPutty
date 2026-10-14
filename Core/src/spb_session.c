@@ -266,6 +266,7 @@ static void cmd_release(void *vctx)
     spb_session *s = (spb_session *)vctx;
     destroy_connection(s);
     spb_terminal_free(s);
+    spb_seat_cancel_log_prompt(s);
     log_free(s->logctx);
     conf_free(s->conf);
     spb_screen_free(s->screen);
@@ -311,6 +312,7 @@ spb_session *spb_session_create(const spb_settings *settings,
      */
     s->conf = conf_new();
     spb_settings_load_into_conf(settings, s->conf);
+    prepare_session(s->conf);          /* as GTK new_session_window */
     s->logctx = log_init(&s->logpolicy, s->conf);
     s->screen = spb_screen_new();
 

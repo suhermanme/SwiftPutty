@@ -1,7 +1,8 @@
 /*
  * C-level tests for the PuTTY core thread and the session executor (M02):
  * timers, command ordering, Raw sessions against a local TCP server,
- * failure paths, release semantics, concurrency and shutdown.
+ * failure paths, release semantics, concurrency and shutdown. Also the
+ * session log and its "file exists" question (M05).
  *
  * Uses only the public PuTTYBridge.h API. Exit status 0 on success. Run
  * plain, under `leaks --atExit`, and under ASan/UBSan and TSan by
@@ -143,6 +144,13 @@ typedef struct recorder {
     char *output;
     size_t output_len, output_cap;
     int event_log_lines;
+    char *event_log_text;              /* all lines, '\n'-terminated */
+    int prompts;
+    spb_prompt_kind prompt_kind;
+    uint64_t prompt_id;
+    char *prompt_title;
+    char *prompt_paragraph;
+    int prompts_cancelled;
     bool got_exit;
     int32_t exit_code;
     bool released;
@@ -161,6 +169,9 @@ static void rec_destroy(recorder *r)
 {
     free(r->last_detail);
     free(r->output);
+    free(r->event_log_text);
+    free(r->prompt_title);
+    free(r->prompt_paragraph);
     pthread_cond_destroy(&r->cond);
     pthread_mutex_destroy(&r->lock);
 }
@@ -196,6 +207,10 @@ static void cb_event_log(void *ctx, const char *line)
     recorder *r = ctx;
     rec_enter(r);
     r->event_log_lines++;
+    size_t old = r->event_log_text ? strlen(r->event_log_text) : 0;
+    r->event_log_text = realloc(r->event_log_text, old + strlen(line) + 2);
+    strcpy(r->event_log_text + old, line);
+    strcat(r->event_log_text + old, "\n");
     rec_leave(r);
 }
 
@@ -231,12 +246,42 @@ static void cb_released(void *ctx)
     rec_leave(r);
 }
 
+static void cb_prompt(void *ctx, const spb_prompt *prompt)
+{
+    recorder *r = ctx;
+    rec_enter(r);
+    r->prompts++;
+    r->prompt_kind = prompt->kind;
+    r->prompt_id = prompt->id;
+    free(r->prompt_title);
+    free(r->prompt_paragraph);
+    r->prompt_title = r->prompt_paragraph = NULL;
+    for (size_t i = 0; i < prompt->n_items; i++) {
+        if (prompt->items[i].type == SPB_DIALOG_TITLE && !r->prompt_title)
+            r->prompt_title = strdup(prompt->items[i].text);
+        if (prompt->items[i].type == SPB_DIALOG_PARAGRAPH &&
+            !r->prompt_paragraph)
+            r->prompt_paragraph = strdup(prompt->items[i].text);
+    }
+    rec_leave(r);
+}
+
+static void cb_prompt_cancelled(void *ctx, uint64_t id)
+{
+    recorder *r = ctx;
+    rec_enter(r);
+    r->prompts_cancelled++;
+    rec_leave(r);
+}
+
 static const spb_session_callbacks recording_callbacks = {
     .state_changed = cb_state,
     .event_log = cb_event_log,
     .output = cb_output,
     .remote_exit = cb_remote_exit,
     .released = cb_released,
+    .prompt = cb_prompt,
+    .prompt_cancelled = cb_prompt_cancelled,
 };
 
 typedef bool (*rec_pred)(recorder *r, const void *arg);
@@ -280,6 +325,11 @@ static bool pred_output_len(recorder *r, const void *arg)
 static bool pred_released(recorder *r, const void *arg)
 {
     return r->released;
+}
+
+static bool pred_prompted(recorder *r, const void *arg)
+{
+    return r->prompts > 0;
 }
 
 static bool wait_state(recorder *r, spb_session_state state, double timeout)
@@ -667,6 +717,220 @@ static void test_shutdown(server *echo)
     spb_settings_free(later);
 }
 
+/* ---------- Session log (M05) ---------- */
+
+static void write_file(const char *path, const char *text)
+{
+    FILE *fp = fopen(path, "wb");
+    fputs(text, fp);
+    fclose(fp);
+}
+
+/* Contents of path (owned), or NULL if it does not exist. */
+static char *read_file(const char *path)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return NULL;
+    char *buf = calloc(1, 65536);
+    size_t n = fread(buf, 1, 65535, fp);
+    buf[n] = '\0';
+    fclose(fp);
+    return buf;
+}
+
+typedef enum {
+    LOG_NO_ANSWER,          /* release with the question still open */
+    LOG_ANSWER_WHILE_CONNECTED,
+    LOG_ANSWER_AFTER_CLOSE, /* the connection is gone; queued data stays */
+} log_answer_timing;
+
+/*
+ * One logged Raw session: "All session output" to path, with the given
+ * "if the file exists" setting. If a question comes, it is answered with
+ * answer at the given time. Returns the file's contents afterwards.
+ */
+static char *logged_session(server *echo, const char *path,
+                            const char *clash, bool expect_prompt,
+                            spb_prompt_answer answer,
+                            log_answer_timing timing, recorder *r)
+{
+    spb_settings *settings = raw_settings("127.0.0.1", echo->port);
+    spb_settings_set(settings, "LogType", "2");
+    spb_settings_set(settings, "LogFileName", path);
+    spb_settings_set(settings, "LogFileClash", clash);
+    spb_settings_set(settings, "LogHeader", "0");
+    spb_session *s = new_session(settings, r);
+    spb_settings_free(settings);
+
+    spb_session_start(s);
+    CHECK(wait_state(r, SPB_SESSION_CONNECTED, 10));
+    spb_session_send(s, "logged\n", 7);
+    CHECK(wait_output(r, 7, 10));
+    /* The terminal has logged what it received by the next iteration. */
+    CHECK(spb_core_barrier());
+    CHECK(spb_core_barrier());
+
+    if (expect_prompt) {
+        CHECK(rec_wait(r, pred_prompted, NULL, 10));
+        pthread_mutex_lock(&r->lock);
+        CHECK(r->prompts == 1);
+        CHECK(r->prompt_kind == SPB_PROMPT_LOG_FILE_EXISTS);
+        CHECK(r->prompt_title &&
+              !strcmp(r->prompt_title, "SwiftPutty Log to File"));
+        CHECK(r->prompt_paragraph && strstr(r->prompt_paragraph, path) &&
+              strstr(r->prompt_paragraph, "already exists"));
+        uint64_t id = r->prompt_id;
+        pthread_mutex_unlock(&r->lock);
+
+        if (timing == LOG_ANSWER_AFTER_CLOSE) {
+            spb_session_close(s);
+            CHECK(wait_state(r, SPB_SESSION_CLOSED, 10));
+            CHECK(spb_core_barrier());
+            /* Not withdrawn with the connection. */
+            pthread_mutex_lock(&r->lock);
+            CHECK(r->prompts_cancelled == 0);
+            pthread_mutex_unlock(&r->lock);
+        }
+        if (timing != LOG_NO_ANSWER) {
+            spb_session_answer_prompt(s, id, answer);
+            /* A second answer is stale and ignored. */
+            spb_session_answer_prompt(s, id, SPB_ANSWER_LOG_OVERWRITE);
+            /* Let the answer's Event Log line out before release, which
+             * suppresses callbacks at once. */
+            CHECK(spb_core_barrier());
+        }
+    } else {
+        pthread_mutex_lock(&r->lock);
+        CHECK(r->prompts == 0);
+        pthread_mutex_unlock(&r->lock);
+    }
+
+    spb_session_release(s);
+    CHECK(rec_wait(r, pred_released, NULL, 10));
+    CHECK(r->callbacks_after_release == 0);
+    return read_file(path);
+}
+
+static void test_session_log(server *echo, const char *base)
+{
+    char path[600];
+    snprintf(path, sizeof(path), "%s/session.log", base);
+    recorder r;
+    char *contents;
+
+    /* No file yet: created without asking. */
+    unlink(path);
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", false, 0, 0, &r);
+    CHECK(contents && !strcmp(contents, "logged\n"));
+    CHECK(r.event_log_text &&
+          strstr(r.event_log_text, "Writing new session log (raw mode)"));
+    free(contents);
+    rec_destroy(&r);
+
+    /* Ask; the answers are GTK PuTTY's buttons. */
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", true,
+                              SPB_ANSWER_LOG_APPEND,
+                              LOG_ANSWER_WHILE_CONNECTED, &r);
+    CHECK(contents && !strcmp(contents, "old\nlogged\n"));
+    CHECK(r.event_log_text &&
+          strstr(r.event_log_text, "Appending session log"));
+    free(contents);
+    rec_destroy(&r);
+
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", true,
+                              SPB_ANSWER_LOG_OVERWRITE,
+                              LOG_ANSWER_WHILE_CONNECTED, &r);
+    CHECK(contents && !strcmp(contents, "logged\n"));
+    free(contents);
+    rec_destroy(&r);
+
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", true, SPB_ANSWER_CANCEL,
+                              LOG_ANSWER_WHILE_CONNECTED, &r);
+    CHECK(contents && !strcmp(contents, "old\n"));
+    CHECK(r.event_log_text &&
+          strstr(r.event_log_text, "Disabled writing session log"));
+    free(contents);
+    rec_destroy(&r);
+
+    /* Answered after the connection has gone: what was received while
+     * the question was open is still written. */
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", true,
+                              SPB_ANSWER_LOG_APPEND,
+                              LOG_ANSWER_AFTER_CLOSE, &r);
+    CHECK(contents && !strcmp(contents, "old\nlogged\n"));
+    free(contents);
+    rec_destroy(&r);
+
+    /* Released with the question open: withdrawn; file untouched. */
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "-1", true, 0, LOG_NO_ANSWER,
+                              &r);
+    CHECK(contents && !strcmp(contents, "old\n"));
+    free(contents);
+    rec_destroy(&r);
+
+    /* "Always overwrite" and "Always append" do not ask. */
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "1", false, 0, 0, &r);
+    CHECK(contents && !strcmp(contents, "logged\n"));
+    free(contents);
+    rec_destroy(&r);
+
+    write_file(path, "old\n");
+    rec_init(&r);
+    contents = logged_session(echo, path, "0", false, 0, 0, &r);
+    CHECK(contents && !strcmp(contents, "old\nlogged\n"));
+    free(contents);
+    rec_destroy(&r);
+
+    unlink(path);
+}
+
+/* ---------- prepare_session ---------- */
+
+static void test_prepare_session(server *echo)
+{
+    /* "user@host:junk" connects to host with that user name, as PuTTY. */
+    spb_settings *settings = raw_settings(" someone@127.0.0.1:99 ",
+                                          echo->port);
+    spb_settings_prepare_session(settings);
+    CHECK(!strcmp(spb_settings_get(settings, "HostName"), "127.0.0.1"));
+    CHECK(!strcmp(spb_settings_get(settings, "UserName"), "someone"));
+
+    /* An unbracketed IPv6 literal keeps its colons. */
+    spb_settings_set(settings, "HostName", "::1");
+    spb_settings_prepare_session(settings);
+    CHECK(!strcmp(spb_settings_get(settings, "HostName"), "::1"));
+
+    /* Sessions apply it themselves. */
+    spb_settings_set(settings, "HostName", "other@127.0.0.1");
+    recorder r;
+    rec_init(&r);
+    spb_session *s = new_session(settings, &r);
+    spb_settings_free(settings);
+    spb_settings *used = spb_session_copy_settings(s);
+    CHECK(!strcmp(spb_settings_get(used, "HostName"), "127.0.0.1"));
+    CHECK(!strcmp(spb_settings_get(used, "UserName"), "other"));
+    spb_settings_free(used);
+    spb_session_start(s);
+    CHECK(wait_state(&r, SPB_SESSION_CONNECTED, 10));
+    spb_session_release(s);
+    CHECK(rec_wait(&r, pred_released, NULL, 10));
+    rec_destroy(&r);
+}
+
 int main(void)
 {
     char template[] = "/tmp/spb-session-test-XXXXXX";
@@ -695,6 +959,8 @@ int main(void)
     test_failures();
     test_release_paths(&echo);
     test_concurrent_sessions(&echo);
+    test_session_log(&echo, base);
+    test_prepare_session(&echo);
     test_shutdown(&echo);
     CHECK(spb_debug_live_settings() == 0);
 

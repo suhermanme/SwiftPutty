@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 4
+#define SPB_API_VERSION 5
 
 /* ---------- Library information ---------- */
 
@@ -139,6 +139,16 @@ const char *spb_settings_value_at(const spb_settings *settings,
  */
 void spb_settings_normalise(spb_settings *settings);
 
+/*
+ * What PuTTY does to settings just before it connects (upstream
+ * prepare_session, as GTK PuTTY's new_session_window): leading
+ * whitespace is trimmed from the host name, a "user@" prefix becomes the
+ * user name, a single ":suffix" is dropped, and remaining whitespace is
+ * removed. spb_session_create applies it itself; frontends call it to
+ * show the destination as it will be used. Also normalises.
+ */
+void spb_settings_prepare_session(spb_settings *settings);
+
 /* ---------- Session ---------- */
 
 typedef struct spb_session spb_session;
@@ -163,6 +173,13 @@ typedef enum spb_prompt_kind {
     /* The cached host key's type is below the warning threshold, though
      * a better one is available. Answers as for WEAK_CRYPTO. */
     SPB_PROMPT_WEAK_CACHED_HOST_KEY,
+    /* The session log file exists and the settings say to ask (API v5).
+     * Answers: LOG_OVERWRITE ("Overwrite"), LOG_APPEND ("Append"), CANCEL
+     * ("Disable": no log for this session). Asked independently of the
+     * dialogs above, so two prompts can be pending at once; it is not
+     * withdrawn when the connection ends, only when the session is
+     * released. */
+    SPB_PROMPT_LOG_FILE_EXISTS,
 } spb_prompt_kind;
 
 /* PuTTY's structured dialog text (SeatDialogText). */
@@ -194,6 +211,8 @@ typedef enum spb_prompt_answer {
     SPB_ANSWER_CANCEL,
     SPB_ANSWER_ACCEPT_ONCE,
     SPB_ANSWER_ACCEPT_AND_STORE,
+    SPB_ANSWER_LOG_OVERWRITE,    /* API v5 */
+    SPB_ANSWER_LOG_APPEND,       /* API v5 */
 } spb_prompt_answer;
 
 typedef enum spb_session_state {

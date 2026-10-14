@@ -7,7 +7,7 @@
 | **M02** | Session executor and event loop | **COMPLETE** (2026-10-14) |
 | **M03** | Terminal rendering foundation | **COMPLETE** (2026-10-14) |
 | **M04** | Basic SSH session | **COMPLETE** (2026-10-14) |
-| M05 | Saved sessions and PuTTY config UI | NOT STARTED |
+| **M05** | Saved sessions and PuTTY config UI | **COMPLETE** (2026-10-15) |
 | M06 | Terminal parity | NOT STARTED |
 | M07 | Live session reconfiguration framework | NOT STARTED |
 | M08 | SSH tunnels + live tunnel reconfiguration | NOT STARTED |
@@ -20,6 +20,100 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M05 — Saved sessions and PuTTY config UI
+
+**Delivered**
+
+- **Saved sessions** (`Sources/Persistence`, D-027): `SavedSessionStore`
+  keeps PuTTY keyword maps in one versioned JSON file
+  (`~/Library/Application Support/SwiftPutty/Saved Sessions.json`),
+  written atomically, mode 0600 in a 0700 directory. PuTTY's rules:
+  "Default Settings" first, `strcmp` order, empty name = Default
+  Settings, missing sessions load built-in defaults, normalised saves. A
+  newer or unreadable file is reported and never overwritten.
+- **Configuration dialog** (`Sources/ConfigurationUI`, D-028): the app now
+  starts with "SwiftPutty Configuration", PuTTY's tree and panels for
+  Session, Session/Logging, Terminal, Window, Window/Appearance,
+  Window/Behaviour, Connection and Connection/Data, with PuTTY's wording
+  and saved values (rows in CONFIGURATION_PARITY.md). `ConfigurationModel`
+  mirrors `sessionsaver_handler` (name box selecting by PuTTY's binary
+  search; Load; Save to the typed or selected name; Delete, never Default
+  Settings; double-click opens a saved session with a host; Open's "list
+  had the focus" case; beeps where PuTTY beeps), `config_protocols_handler`
+  (port follows the protocol only while it is the old default; Raw's
+  default port is 0, shown blank, as PuTTY; the interim launcher used 23)
+  and the keepalive minutes/seconds encoding. Only controls whose effect
+  SwiftPutty implements are shown. Font: fixed-pitch family and size.
+  Log file: Browse… via `NSSavePanel`.
+- **App**: Open starts the session window and closes the dialog; Cancel
+  closes it (and the app if no session is open); About; File > New
+  Session… (⌘N) reopens it from Default Settings. Session windows carry
+  the whole settings map; the title follows GTK PuTTY (terminal title,
+  else `WinTitle`, else "host - SwiftPutty"). The app runs in the home
+  directory, so relative log names (default `putty.log`) land there as
+  with Unix PuTTY. The interim launcher is gone.
+- **Bridge API v5** (D-029):
+  - session logging's "file exists, ask" question
+    (`SPB_PROMPT_LOG_FILE_EXISTS`; Overwrite / Append / Disable, GTK's
+    wording) in its own dialog slot, kept after the connection ends and
+    withdrawn at release. Previously logging was silently disabled
+    whenever the file existed, with PuTTY's default settings;
+  - `spb_settings_prepare_session`; sessions now apply upstream
+    `prepare_session` (`user@host`, `:suffix`, whitespace) as GTK PuTTY
+    does.
+- **Swift**: `PuTTYSettings` is `Codable`/`Hashable` and has
+  `preparedForSession()`; `PuTTYPrompt.Kind.logFileExists`, answers
+  `.overwriteLog` / `.appendToLog`; `SessionController.pendingPrompts`
+  (a host key dialog and a log question can both be pending; the window
+  shows them in turn).
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| `spb_bridge_test`, `spb_terminal_test`, `spb_ssh_test`, `spb_link_closure_test` | Passed |
+| `spb_session_test` (adds session log: new file, Ask → Overwrite / Append / Disable, answered after the connection closed, released while asking, Always overwrite/append; `prepare_session`) | Passed |
+| `leaks --atExit`: all four C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan (Debug) | Passed, no reports |
+| C tests under TSan (Debug, `halt_on_error=1`) | Passed, no reports |
+| `swift test` (75 tests, 15 suites; new: saved-session store, configuration dialog model, log question through `SessionController`, its dialog layout) | 75/75 passed |
+| `swift test --sanitize=address` / `--sanitize=thread` | 75/75 passed, no reports |
+| App Debug build; Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
+| Every configuration panel rendered offscreen in a real `NSWindow` and inspected | Layout as PuTTY's panels; fixed during M05: label-as-placeholder text, squeezed edit boxes |
+
+**Problems found and fixed during M05**
+
+- With PuTTY's default "Ask the user every time", session logging was
+  disabled whenever the log file existed (the M02 placeholder); now the
+  question is asked (API v5).
+- The bridge skipped `prepare_session`, so `user@host` in the host box
+  was looked up as a host name.
+- Raw's port defaulted to 23 in the interim launcher; PuTTY's is 0.
+- The Connection panel's logical host name first used keyword
+  `LogicalHost`; PuTTY's is `LogHost`. Panels now use `PuTTYKeyword`,
+  and a test checks every keyword against PuTTY's saved settings.
+- A C test released a session straight after answering, so release
+  (D-017) suppressed the answer's Event Log line; the test now waits.
+
+**Limitations / not done**
+
+- Not exercised by hand: the screen was locked, so the dialog was
+  checked by offscreen rendering and its logic by unit tests; keyboard
+  focus, double-click in the list, the font popover, `NSSavePanel`, the
+  Local Network prompt and opening a saved session against the LAN
+  server through the window are not yet checked interactively.
+- Panels not yet present: Keyboard, Bell, Features, Translation,
+  Selection, Colours (M06); Proxy, SSH and its subpanels, Serial, Telnet,
+  Rlogin, SUPDUP (M09, M11, M12); the environment variables list and the
+  printer (M12). Connection types: SSH and Raw (M11 for the rest).
+- No Change Settings (M07): mid-session Save, the runtime/reconnect
+  split, and `log_reconfig`, which will also have to withdraw a pending
+  log file question when it closes the log.
+- No import of PuTTY's Unix session files; no "Saved Sessions" or
+  "Duplicate Session" menus (M10).
 
 ## M04 — Basic SSH session
 
