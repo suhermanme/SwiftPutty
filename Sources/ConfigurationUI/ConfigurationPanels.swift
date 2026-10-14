@@ -24,46 +24,50 @@ struct SessionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SettingsGroup(title: "Specify the destination you want to connect to") {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Host Name (or IP address)")
-                        PlainTextField(label: "Host Name (or IP address)",
-                                       text: Binding(get: { model.string(.hostName) },
-                                                     set: { model.setString(.hostName, $0) }))
-                            .focused($focus, equals: .host)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Port")
-                        IntegerField(label: "Port", value: $model.port, blankWhenZero: true)
-                            .focused($focus, equals: .port)
-                            .frame(width: 80)
-                    }
-                }
-                Text("Connection type:")
-                HStack {
-                    Picker("Connection type", selection: Binding(
-                        get: { model.connectionType == "ssh" ? "ssh" : "other" },
-                        set: { model.connectionType = $0 == "ssh" ? "ssh" : otherType })) {
-                        Text("SSH").tag("ssh")
-                        Text("Other:").tag("other")
-                    }
-                    .pickerStyle(.radioGroup)
-                    .horizontalRadioGroupLayout()
-                    .labelsHidden()
-                    Picker("Other connection type", selection: Binding(
-                        get: { otherType },
-                        set: { model.connectionType = $0 })) {
-                        ForEach(Self.otherTypes, id: \.value) { type in
-                            Text(type.label).tag(type.value)
+            if !model.isMidSession {
+                SettingsGroup(title: "Specify the destination you want to connect to") {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Host Name (or IP address)")
+                            PlainTextField(label: "Host Name (or IP address)",
+                                           text: Binding(get: { model.string(.hostName) },
+                                                         set: { model.setString(.hostName, $0) }))
+                                .focused($focus, equals: .host)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Port")
+                            IntegerField(label: "Port", value: $model.port, blankWhenZero: true)
+                                .focused($focus, equals: .port)
+                                .frame(width: 80)
                         }
                     }
-                    .labelsHidden()
-                    .fixedSize()
+                    Text("Connection type:")
+                    HStack {
+                        Picker("Connection type", selection: Binding(
+                            get: { model.connectionType == "ssh" ? "ssh" : "other" },
+                            set: { model.connectionType = $0 == "ssh" ? "ssh" : otherType })) {
+                            Text("SSH").tag("ssh")
+                            Text("Other:").tag("other")
+                        }
+                        .pickerStyle(.radioGroup)
+                        .horizontalRadioGroupLayout()
+                        .labelsHidden()
+                        Picker("Other connection type", selection: Binding(
+                            get: { otherType },
+                            set: { model.connectionType = $0 })) {
+                            ForEach(Self.otherTypes, id: \.value) { type in
+                                Text(type.label).tag(type.value)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
                 }
+
             }
 
-            SettingsGroup(title: "Load, save or delete a stored session") {
+            SettingsGroup(title: model.isMidSession ? "Save the current session settings"
+                                                    : "Load, save or delete a stored session") {
                 Text("Saved Sessions")
                 PlainTextField(label: "Saved Sessions",
                                text: Binding(get: { model.savedSessionName },
@@ -72,9 +76,15 @@ struct SessionPanel: View {
                 HStack(alignment: .top) {
                     sessionList
                     VStack(spacing: 8) {
-                        Button("Load") { model.loadSelectedSession() }
+                        // Mid-session only Save (config.c): loading could
+                        // change settings the dialog does not show.
+                        if !model.isMidSession {
+                            Button("Load") { model.loadSelectedSession() }
+                        }
                         Button("Save") { model.save() }
-                        Button("Delete") { model.deleteSelectedSession() }
+                        if !model.isMidSession {
+                            Button("Delete") { model.deleteSelectedSession() }
+                        }
                     }
                     .frame(width: 80)
                     .buttonStyle(.bordered)
@@ -129,8 +139,9 @@ struct LoggingPanel: View {
             SettingsGroup(title: nil) {
                 RadioSetting(model: model, label: "Session logging:", keyword: .logType,
                              options: [("None", "0"), ("Printable output", "1"),
-                                       ("All session output", "2"), ("SSH packets", "3"),
-                                       ("SSH packets and raw data", "4")],
+                                       ("All session output", "2")]
+                                 + (model.showsSSHLogging
+                                    ? [("SSH packets", "3"), ("SSH packets and raw data", "4")] : []),
                              horizontal: false)
                 LabeledContent("Log file name:") {
                     HStack {
@@ -153,10 +164,12 @@ struct LoggingPanel: View {
                 CheckboxSetting(model: model, label: "Flush log file frequently", keyword: .logFlush)
                 CheckboxSetting(model: model, label: "Include header", keyword: .logHeader)
             }
-            SettingsGroup(title: "Options specific to SSH packet logging") {
-                CheckboxSetting(model: model, label: "Omit known password fields",
-                                keyword: .sshLogOmitPasswords)
-                CheckboxSetting(model: model, label: "Omit session data", keyword: .sshLogOmitData)
+            if model.showsSSHLogging {
+                SettingsGroup(title: "Options specific to SSH packet logging") {
+                    CheckboxSetting(model: model, label: "Omit known password fields",
+                                    keyword: .sshLogOmitPasswords)
+                    CheckboxSetting(model: model, label: "Omit session data", keyword: .sshLogOmitData)
+                }
             }
         }
     }
@@ -353,19 +366,22 @@ struct ConnectionPanel: View {
                         .frame(width: 80)
                 }
             }
-            SettingsGroup(title: "Low-level TCP connection options") {
-                CheckboxSetting(model: model, label: "Disable Nagle's algorithm (TCP_NODELAY option)",
-                                keyword: .tcpNoDelay)
-                CheckboxSetting(model: model, label: "Enable TCP keepalives (SO_KEEPALIVE option)",
-                                keyword: .tcpKeepalives)
-            }
-            SettingsGroup(title: "Internet protocol version") {
-                RadioSetting(model: model, label: "", keyword: .addressFamily,
-                             options: [("Auto", "0"), ("IPv4", "1"), ("IPv6", "2")])
-            }
-            SettingsGroup(title: "Logical name of remote host") {
-                TextSetting(model: model, label: "Logical name of remote host (e.g. for SSH key lookup):",
-                            keyword: .logHost)
+            // Only the keepalive interval can change on a live connection.
+            if !model.isMidSession {
+                SettingsGroup(title: "Low-level TCP connection options") {
+                    CheckboxSetting(model: model, label: "Disable Nagle's algorithm (TCP_NODELAY option)",
+                                    keyword: .tcpNoDelay)
+                    CheckboxSetting(model: model, label: "Enable TCP keepalives (SO_KEEPALIVE option)",
+                                    keyword: .tcpKeepalives)
+                }
+                SettingsGroup(title: "Internet protocol version") {
+                    RadioSetting(model: model, label: "", keyword: .addressFamily,
+                                 options: [("Auto", "0"), ("IPv4", "1"), ("IPv6", "2")])
+                }
+                SettingsGroup(title: "Logical name of remote host") {
+                    TextSetting(model: model, label: "Logical name of remote host (e.g. for SSH key lookup):",
+                                keyword: .logHost)
+                }
             }
         }
     }

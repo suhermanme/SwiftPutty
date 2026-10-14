@@ -105,9 +105,11 @@ public struct ConfigurationView: View {
             }
             Divider()
             HStack {
-                Button("About", action: onAbout)
+                if !model.isMidSession {
+                    Button("About", action: onAbout)
+                }
                 Spacer()
-                Button("Open") {
+                Button(model.isMidSession ? "Apply" : "Open") {
                     if let settings = model.open() {
                         onOpen(settings)
                     }
@@ -133,7 +135,7 @@ public struct ConfigurationView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .selectionDisabled()
-            ForEach(ConfigurationCategory.allCases) { category in
+            ForEach(ConfigurationCategory.allCases.filter(isShown)) { category in
                 Text(category.name)
                     .padding(.leading, CGFloat(category.depth) * 16)
                     .tag(category)
@@ -141,6 +143,12 @@ public struct ConfigurationView: View {
         }
         .listStyle(.sidebar)
         .frame(width: 170)
+    }
+
+    /// Connection/Data only matters to a new connection (config.c hides
+    /// it mid-session).
+    private func isShown(_ category: ConfigurationCategory) -> Bool {
+        !(model.isMidSession && category == .data)
     }
 
     @ViewBuilder

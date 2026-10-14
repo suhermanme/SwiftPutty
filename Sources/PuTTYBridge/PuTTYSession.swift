@@ -72,6 +72,13 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case prompt(PuTTYPrompt)
     /// The connection ended before the prompt was answered: dismiss it.
     case promptCancelled(id: UInt64)
+    /// Answer to ``PuTTYSession/exportSettings(request:)``: the running
+    /// settings, and PuTTY's `backend_cfg_info` (0 unknown or no
+    /// connection, 1 SSH-1, 2 SSH-2, -1 connection-sharing downstream).
+    case settingsExported(request: UInt64, PuTTYSettings, protocolInfo: Int32)
+    /// Answer to ``PuTTYSession/reconfigure(_:request:)``; `error` is nil
+    /// on success.
+    case reconfigured(request: UInt64, error: String?)
 }
 
 /// A question PuTTY asks in a dialog box: host key confirmation, a
@@ -256,6 +263,17 @@ public final class PuTTYSession: Sendable {
             },
             prompt_cancelled: { ctx, id in
                 EventSink.from(ctx).yield(.promptCancelled(id: id))
+            },
+            settings_exported: { ctx, request, settings, info in
+                guard let settings else { return }
+                let exported = PuTTYSettings(handle: settings)
+                spb_settings_free(settings)
+                EventSink.from(ctx).yield(.settingsExported(request: request, exported,
+                                                            protocolInfo: info))
+            },
+            reconfigured: { ctx, request, error in
+                EventSink.from(ctx).yield(.reconfigured(request: request,
+                                                        error: error.map { String(cString: $0) }))
             })
 
         var error: UnsafeMutablePointer<CChar>?
@@ -413,7 +431,26 @@ public final class PuTTYSession: Sendable {
                                dirtyRows, rowCapacity)
     }
 
-    /// Snapshot of the session's configuration.
+    /// Asks for the running settings (Change Settings starts from them):
+    /// answered by ``PuTTYSessionEvent/settingsExported(request:_:protocolInfo:)``.
+    public func exportSettings(request: UInt64) {
+        spb_session_export_settings(handle, request)
+    }
+
+    /// Applies edited settings to the running session without
+    /// reconnecting: answered by ``PuTTYSessionEvent/reconfigured(request:error:)``.
+    public func reconfigure(_ settings: PuTTYSettings, request: UInt64) {
+        settings.withBridgeHandle { spb_session_reconfigure(handle, $0, request) }
+    }
+
+    /// Changes whenever the session's connection is created; the same
+    /// across reconfigurations.
+    public var transportID: UInt64 {
+        spb_session_transport_id(handle)
+    }
+
+    /// The settings the session was created with (not changed by
+    /// reconfiguration).
     public var currentSettings: PuTTYSettings {
         let copy = spb_session_copy_settings(handle)!
         defer { spb_settings_free(copy) }

@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 6
+#define SPB_API_VERSION 7
 
 /* ---------- Library information ---------- */
 
@@ -281,6 +281,17 @@ typedef struct spb_session_callbacks {
      * no longer wanted. Without this callback, prompts are refused. */
     void (*prompt)(void *ctx, const spb_prompt *prompt);
     void (*prompt_cancelled)(void *ctx, uint64_t id);
+
+    /* --- Live reconfiguration (M07, API v7) --- */
+
+    /* Answer to spb_session_export_settings: the running settings, owned
+     * by the receiver (free with spb_settings_free). protocol_info is
+     * PuTTY's backend_cfg_info: 0 unknown yet, 1 SSH-1, 2 SSH-2, -1 a
+     * connection-sharing downstream; 0 without a connection. */
+    void (*settings_exported)(void *ctx, uint64_t request,
+                              spb_settings *settings, int32_t protocol_info);
+    /* Answer to spb_session_reconfigure: error is NULL on success. */
+    void (*reconfigured)(void *ctx, uint64_t request, const char *error);
 } spb_session_callbacks;
 
 /*
@@ -316,6 +327,33 @@ void spb_session_send(spb_session *session, const void *data, size_t len);
 /* Send an end-of-file to the backend (PuTTY's SS_EOF special). */
 void spb_session_send_eof(spb_session *session);
 
+/*
+ * Change Settings, as GTK PuTTY (unix/window.c change_settings_menuitem
+ * and after_change_settings_dialog), in two asynchronous steps:
+ *
+ * spb_session_export_settings: the settings to edit, from the RUNNING
+ * configuration (earlier changes included), with the current window title
+ * as the configured title (term_pre_reconfig). Answered by
+ * settings_exported with the same request number.
+ *
+ * spb_session_reconfigure: apply edited settings to the running session
+ * without reconnecting. Every saved keyword is taken from settings;
+ * keywords PuTTY does not save keep their running values. Then, as GTK:
+ * log_reconfig, ldisc_configure, term_reconfig, the clipboards,
+ * backend_reconfig (keepalives, rekey, port forwarding ...), the
+ * character set, scrollback size, and a full redraw. Settings that only
+ * apply to a new connection are stored but have no effect. The frontend
+ * resizes its window if the size, font, border or scrollbar changed.
+ * Answered by reconfigured.
+ */
+void spb_session_export_settings(spb_session *session, uint64_t request);
+void spb_session_reconfigure(spb_session *session,
+                             const spb_settings *settings, uint64_t request);
+
+/* A number that changes whenever the session's connection (Backend) is
+ * created; 0 before the first. Reconfiguration never changes it. */
+uint64_t spb_session_transport_id(const spb_session *session);
+
 /* Disconnect without releasing: the session becomes CLOSED. */
 void spb_session_close(spb_session *session);
 
@@ -330,9 +368,9 @@ void spb_session_release(spb_session *session);
 uint64_t spb_session_id(const spb_session *session);
 
 /*
- * Snapshot of the session's configuration (owned). The configuration does
- * not change after creation until live reconfiguration (M07), which will
- * replace this with an asynchronous export.
+ * The settings the session was created with (owned), as PuTTY will use
+ * them (prepare_session applied). Any thread. Not changed by
+ * reconfiguration: spb_session_export_settings gives the running ones.
  */
 spb_settings *spb_session_copy_settings(const spb_session *session);
 
@@ -523,6 +561,17 @@ uint64_t spb_debug_loop_iterations(void);
  */
 void spb_debug_after_delay(uint32_t delay_ms, void (*fn)(void *ctx),
                            void *ctx);
+
+/*
+ * Risk R-3 self-check: builds a Conf with a non-default value in every
+ * key PuTTY's settings code handles generically, saved or not, sends it
+ * through what Change Settings does (export, then reconfigure), and
+ * checks that every saved keyword and every unsaved key comes back
+ * unchanged. Returns false with an owned message naming the first key
+ * that does not. keys_checked (if non-NULL) receives the number of keys.
+ */
+bool spb_debug_check_reconfigure_roundtrip(size_t *keys_checked,
+                                           char **err_out);
 
 /* Number of spb_settings objects allocated and not yet freed. */
 size_t spb_debug_live_settings(void);

@@ -847,13 +847,21 @@ Ctrl+Insert copy, and `spb_charset_name` / `spb_charset_canonical_name`
 (upstream's character set list). The core is compiled with
 `OSX_META_KEY_CONFIG`, so the Meta-key settings are saved.
 
+M07 (API v7, D-031) implements §6.1–6.3: `spb_session_export_settings`
+and `spb_session_reconfigure` answer through the `settings_exported` and
+`reconfigured` callbacks (request numbers, no waiting on the main
+thread); `spb_session_transport_id` proves a reconfiguration kept the
+connection; `spb_debug_check_reconfigure_roundtrip` is the R-3 check over
+every `conf_key_info[]` key. `spb_session_copy_settings` now returns the
+settings as created (thread-safe); the running `Conf` changes.
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |
 |---|---|---|
 | R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0007`/`0008`; ASan reproduction tests (M08, M13); report upstream |
 | R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | Accept for M02–M10; measure; options: patch `name_lookup` to resolve on a helper thread, or per-session helper process (decide by M14) |
-| R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | Generic overlay over `conf_key_info[]`; round-trip test over all 211 keys in M07 |
+| R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | **Mitigated (M07):** unsaved keys copied from the running Conf generically over `conf_key_info[]`; `spb_debug_check_reconfigure_roundtrip` checks every key, and was shown to fail without the overlay |
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |
 | R-5 | `TermWin` drawing on core thread vs AppKit on main | Frame snapshot design (§8); benchmark in M03/M14 |
 | R-6 | App Sandbox vs. listeners, serial, arbitrary key files, `SSH_AUTH_SOCK` | Evaluate in M15; developer builds unsandboxed |

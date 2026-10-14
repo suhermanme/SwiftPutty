@@ -151,6 +151,11 @@ typedef struct recorder {
     char *prompt_title;
     char *prompt_paragraph;
     int prompts_cancelled;
+    spb_settings *exported;            /* last settings_exported */
+    uint64_t exported_request;
+    int32_t protocol_info;
+    int reconfigured;
+    uint64_t reconfigured_request;
     bool got_exit;
     int32_t exit_code;
     bool released;
@@ -172,6 +177,7 @@ static void rec_destroy(recorder *r)
     free(r->event_log_text);
     free(r->prompt_title);
     free(r->prompt_paragraph);
+    spb_settings_free(r->exported);
     pthread_cond_destroy(&r->cond);
     pthread_mutex_destroy(&r->lock);
 }
@@ -274,6 +280,28 @@ static void cb_prompt_cancelled(void *ctx, uint64_t id)
     rec_leave(r);
 }
 
+static void cb_exported(void *ctx, uint64_t request, spb_settings *settings,
+                        int32_t info)
+{
+    recorder *r = ctx;
+    rec_enter(r);
+    spb_settings_free(r->exported);
+    r->exported = settings;
+    r->exported_request = request;
+    r->protocol_info = info;
+    rec_leave(r);
+}
+
+static void cb_reconfigured(void *ctx, uint64_t request, const char *error)
+{
+    recorder *r = ctx;
+    rec_enter(r);
+    if (!error)
+        r->reconfigured++;
+    r->reconfigured_request = request;
+    rec_leave(r);
+}
+
 static const spb_session_callbacks recording_callbacks = {
     .state_changed = cb_state,
     .event_log = cb_event_log,
@@ -282,6 +310,8 @@ static const spb_session_callbacks recording_callbacks = {
     .released = cb_released,
     .prompt = cb_prompt,
     .prompt_cancelled = cb_prompt_cancelled,
+    .settings_exported = cb_exported,
+    .reconfigured = cb_reconfigured,
 };
 
 typedef bool (*rec_pred)(recorder *r, const void *arg);
@@ -325,6 +355,16 @@ static bool pred_output_len(recorder *r, const void *arg)
 static bool pred_released(recorder *r, const void *arg)
 {
     return r->released;
+}
+
+static bool pred_exported(recorder *r, const void *arg)
+{
+    return r->exported && r->exported_request == *(const uint64_t *)arg;
+}
+
+static bool pred_reconfigured(recorder *r, const void *arg)
+{
+    return r->reconfigured >= *(const int *)arg;
 }
 
 static bool pred_prompted(recorder *r, const void *arg)
@@ -898,6 +938,94 @@ static void test_session_log(server *echo, const char *base)
     unlink(path);
 }
 
+/* ---------- Live reconfiguration (M07) ---------- */
+
+/* Export the running settings (owned by the caller). */
+static spb_settings *export_settings(spb_session *s, recorder *r,
+                                     uint64_t request)
+{
+    spb_session_export_settings(s, request);
+    CHECK(rec_wait(r, pred_exported, &request, 10));
+    pthread_mutex_lock(&r->lock);
+    spb_settings *settings = r->exported;
+    r->exported = NULL;
+    pthread_mutex_unlock(&r->lock);
+    return settings;
+}
+
+static void test_reconfigure(server *echo, const char *base)
+{
+    char path[600];
+    snprintf(path, sizeof(path), "%s/reconfig.log", base);
+    unlink(path);
+    recorder r;
+    rec_init(&r);
+    spb_settings *settings = raw_settings("127.0.0.1", echo->port);
+    spb_session *s = new_session(settings, &r);
+    spb_settings_free(settings);
+    CHECK(spb_session_transport_id(s) == 0);
+    spb_session_start(s);
+    CHECK(wait_state(&r, SPB_SESSION_CONNECTED, 10));
+    uint64_t transport = spb_session_transport_id(s);
+    CHECK(transport != 0);
+
+    /* The running settings, as PuTTY would save them. */
+    spb_settings *running = export_settings(s, &r, 1);
+    CHECK(running && !strcmp(spb_settings_get(running, "HostName"), "127.0.0.1"));
+    CHECK(running && !strcmp(spb_settings_get(running, "Protocol"), "raw"));
+    CHECK(r.protocol_info == 0);                       /* Raw has no versions */
+
+    /* Applying them unchanged is a no-op that keeps the connection. */
+    int want = 1;
+    spb_session_reconfigure(s, running, 2);
+    CHECK(rec_wait(&r, pred_reconfigured, &want, 10));
+    CHECK(r.reconfigured_request == 2);
+
+    /* Turn logging on mid-session: later output is logged. */
+    spb_settings_set(running, "LogType", "2");
+    spb_settings_set(running, "LogFileName", path);
+    spb_settings_set(running, "LogHeader", "0");
+    want = 2;
+    spb_session_reconfigure(s, running, 3);
+    CHECK(rec_wait(&r, pred_reconfigured, &want, 10));
+    spb_settings *after = export_settings(s, &r, 4);
+    CHECK(after && !strcmp(spb_settings_get(after, "LogType"), "2"));
+    spb_settings_free(after);
+    spb_session_send(s, "after\n", 6);
+    CHECK(wait_output(&r, 6, 10));
+    CHECK(spb_core_barrier());
+    CHECK(spb_core_barrier());
+    CHECK(spb_session_transport_id(s) == transport);
+
+    /* The creation snapshot is unchanged by reconfiguration. */
+    spb_settings *created = spb_session_copy_settings(s);
+    CHECK(!strcmp(spb_settings_get(created, "LogType"), "0"));
+    spb_settings_free(created);
+
+    spb_session_release(s);
+    CHECK(rec_wait(&r, pred_released, NULL, 10));
+    spb_settings_free(running);
+    char *contents = read_file(path);
+    CHECK(contents && !strcmp(contents, "after\n"));
+    free(contents);
+    unlink(path);
+    rec_destroy(&r);
+
+    /* Reconfiguring after the connection has ended is harmless. */
+    rec_init(&r);
+    settings = raw_settings("127.0.0.1", unused_port());
+    s = new_session(settings, &r);
+    spb_session_start(s);
+    CHECK(wait_state(&r, SPB_SESSION_FAILED, 10));
+    want = 1;
+    spb_session_reconfigure(s, settings, 5);
+    CHECK(rec_wait(&r, pred_reconfigured, &want, 10));
+    spb_settings_free(settings);
+    spb_session_release(s);
+    CHECK(rec_wait(&r, pred_released, NULL, 10));
+    rec_destroy(&r);
+}
+
 /* ---------- prepare_session ---------- */
 
 static void test_prepare_session(server *echo)
@@ -961,6 +1089,7 @@ int main(void)
     test_concurrent_sessions(&echo);
     test_session_log(&echo, base);
     test_prepare_session(&echo);
+    test_reconfigure(&echo, base);
     test_shutdown(&echo);
     CHECK(spb_debug_live_settings() == 0);
 

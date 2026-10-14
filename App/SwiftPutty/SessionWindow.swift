@@ -1,3 +1,5 @@
+import ConfigurationUI
+import Persistence
 import PuTTYBridge
 import SessionLayer
 import SwiftUI
@@ -30,12 +32,17 @@ struct SessionRequest: Codable, Hashable {
 /// One terminal window, as each PuTTY session has its own window.
 struct SessionWindow: View {
     let request: SessionRequest
+    let store: SavedSessionStore
     @State private var controller: SessionController
     @State private var showingError = false
+    /// The open Change Settings dialog (GTK PuTTY's "Reconfiguration").
+    @State private var reconfiguration: ConfigurationModel?
+    @State private var reconfigurationError: String?
     @Environment(\.dismiss) private var dismiss
 
-    init(request: SessionRequest) {
+    init(request: SessionRequest, store: SavedSessionStore) {
         self.request = request
+        self.store = store
         _controller = State(initialValue: SessionController(settings: request.settings))
     }
 
@@ -65,6 +72,54 @@ struct SessionWindow: View {
             } message: {
                 Text(controller.stateDetail ?? "The connection failed.")
             }
+            .background {
+                // A second sheet needs a view of its own.
+                Color.clear
+                    .sheet(item: $reconfiguration) { model in
+                        ConfigurationView(model: model,
+                                          onOpen: { settings in apply(settings) },
+                                          onCancel: cancelChangeSettings,
+                                          onAbout: {})
+                            .interactiveDismissDisabled()
+                    }
+            }
+            .alert("SwiftPutty Reconfiguration", isPresented: Binding(
+                get: { reconfigurationError != nil }, set: { if !$0 { reconfigurationError = nil } })) {
+                Button("OK") {}
+            } message: {
+                Text(reconfigurationError ?? "")
+            }
+            .focusedSceneValue(\.sessionActions, SessionActions(
+                changeSettings: changeSettings,
+                canChangeSettings: controller.session != nil && !controller.isChangingSettings))
+    }
+
+    // MARK: Change Settings (GTK PuTTY change_settings_menuitem)
+
+    private func changeSettings() {
+        Task {
+            guard let running = await controller.beginChangeSettings() else {
+                NSSound.beep()
+                return
+            }
+            reconfiguration = ConfigurationModel(changing: running.settings,
+                                                 protocolInfo: running.protocolInfo,
+                                                 store: store, beep: { NSSound.beep() })
+        }
+    }
+
+    private func apply(_ settings: PuTTYSettings) {
+        reconfiguration = nil
+        Task {
+            if let error = await controller.applyChangeSettings(settings) {
+                reconfigurationError = error
+            }
+        }
+    }
+
+    private func cancelChangeSettings() {
+        reconfiguration = nil
+        controller.cancelChangeSettings()
     }
 
     /// As GTK PuTTY: the title the terminal set, else the configured
@@ -77,7 +132,7 @@ struct SessionWindow: View {
         if !controller.title.isEmpty {
             return controller.title
         }
-        if let title = request.settings["WinTitle"], !title.isEmpty {
+        if let title = controller.settings["WinTitle"], !title.isEmpty {
             return title
         }
         return "\(request.destination) - SwiftPutty"

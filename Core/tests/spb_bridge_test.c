@@ -193,6 +193,20 @@ static void test_charsets(void)
                   "Use font encoding"));
 }
 
+/* Risk R-3: Change Settings loses nothing (M07). */
+static void test_reconfigure_roundtrip(void)
+{
+    size_t keys = 0;
+    char *err = NULL;
+    bool ok = spb_debug_check_reconfigure_roundtrip(&keys, &err);
+    if (!ok)
+        fprintf(stderr, "round trip: %s\n", err ? err : "?");
+    CHECK(ok);
+    CHECK(keys > 200);
+    spb_string_free(err);
+    CHECK(spb_debug_live_settings() == 0);
+}
+
 static void test_session_lifecycle(void)
 {
     spb_settings *s = spb_settings_new_defaults();
@@ -278,6 +292,7 @@ int main(void)
     test_defaults();
     test_normalise();
     test_charsets();
+    test_reconfigure_roundtrip();
     test_session_lifecycle();
     CHECK(spb_debug_live_settings() == 0);
     test_shutdown();

@@ -17,15 +17,16 @@ is © Simon Tatham and contributors, MIT licensed. See
 Milestones **M00** (analysis and architecture), **M01** (build skeleton
 and PuTTY core integration), **M02** (session executor and event loop),
 **M03** (terminal rendering foundation), **M04** (basic SSH session),
-**M05** (saved sessions and configuration dialog) and **M06** (terminal
-parity) are complete. The app starts with PuTTY's configuration dialog
-(Session, Logging, Terminal with Keyboard / Bell / Features, Window with
-Appearance / Behaviour / Translation / Selection / Colours, Connection
-and Data; saved sessions with PuTTY's Load / Save / Delete rules) and
-opens SSH and Raw
+**M05** (saved sessions and configuration dialog), **M06** (terminal
+parity) and **M07** (live Change Settings) are complete. The app starts
+with PuTTY's configuration dialog (Session, Logging, Terminal with
+Keyboard / Bell / Features, Window with Appearance / Behaviour /
+Translation / Selection / Colours, Connection and Data; saved sessions
+with PuTTY's Load / Save / Delete rules) and opens SSH and Raw
 connections in terminal windows driven by PuTTY's own SSH implementation
-and terminal emulator, with PuTTY's host key dialog, in-terminal login and
-session logging. Change Settings on a running session is M07. See
+and terminal emulator, with PuTTY's host key dialog, in-terminal login
+and session logging. Session > Change Settings… changes a running
+session without reconnecting, as PuTTY does. See
 `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Building

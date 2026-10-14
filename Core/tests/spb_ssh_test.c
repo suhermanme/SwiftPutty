@@ -133,6 +133,11 @@ typedef struct record {
     bool prompt_scary, prompt_has_fingerprint;
     char prompt_title[256];
     int prompts_cancelled;
+    /* Event Log and reconfiguration (M07) */
+    char event_log[16384];
+    spb_settings *exported;
+    int32_t protocol_info;
+    int reconfigured;
 } record;
 
 static record rec = {
@@ -184,12 +189,34 @@ static void cb_prompt_cancelled(void *ctx, uint64_t id)
     WITH_REC(rec.prompts_cancelled++);
 }
 
+static void cb_event_log(void *ctx, const char *line)
+{
+    WITH_REC(size_t n = strlen(rec.event_log);
+             snprintf(rec.event_log + n, sizeof(rec.event_log) - n, "%s\n",
+                      line));
+}
+
+static void cb_exported(void *ctx, uint64_t request, spb_settings *settings,
+                        int32_t info)
+{
+    WITH_REC(spb_settings_free(rec.exported); rec.exported = settings;
+             rec.protocol_info = info);
+}
+
+static void cb_reconfigured(void *ctx, uint64_t request, const char *error)
+{
+    WITH_REC(if (!error) rec.reconfigured++);
+}
+
 static const spb_session_callbacks callbacks = {
     .state_changed = cb_state,
     .remote_exit = cb_exit,
     .released = cb_released,
     .prompt = cb_prompt,
     .prompt_cancelled = cb_prompt_cancelled,
+    .event_log = cb_event_log,
+    .settings_exported = cb_exported,
+    .reconfigured = cb_reconfigured,
 };
 
 typedef bool (*rec_pred)(void);
@@ -221,6 +248,10 @@ static bool prompt_was_cancelled(void) { return rec.prompts_cancelled > 0; }
 
 static void reset_record(void)
 {
+    spb_settings_free(rec.exported);
+    rec.exported = NULL;
+    rec.event_log[0] = '\0';
+    rec.reconfigured = 0;
     WITH_REC(rec.state = SPB_SESSION_CREATED; rec.detail[0] = 0;
              rec.got_exit = false; rec.released = false; rec.prompts = 0;
              rec.prompts_cancelled = 0);
@@ -404,6 +435,63 @@ static void test_stored_key_and_wrong_password(fixture *f)
     release_session();
 }
 
+static bool is_exported(void) { return rec.exported != NULL; }
+static bool is_reconfigured(void) { return rec.reconfigured > 0; }
+/* Re-keyed, and the new first choice (ChaCha20) is in use afterwards. */
+static bool rekeyed(void)
+{
+    const char *start = strstr(rec.event_log,
+        "Initiating key re-exchange (cipher settings changed)");
+    if (!start)
+        return false;
+    const char *init = strstr(start, "inbound encryption");
+    if (!init)
+        return false;
+    const char *line = init;
+    while (line > start && line[-1] != '\n')
+        line--;
+    return strstr(line, "ChaCha20") != NULL && strstr(line, "ChaCha20") < init;
+}
+
+/* M07: Change Settings on a live SSH session never reconnects. A new
+ * cipher order makes PuTTY re-key the same connection. */
+static void test_live_reconfigure(fixture *f)
+{
+    open_session(f->port, "tester", false);
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    type("weasel\r");
+    CHECK(wait_rec(is_connected, 20));
+    uint64_t transport = spb_session_transport_id(session);
+    CHECK(transport != 0);
+
+    spb_session_export_settings(session, 7);
+    CHECK(wait_rec(is_exported, 10));
+    pthread_mutex_lock(&rec.lock);
+    spb_settings *s = rec.exported;
+    rec.exported = NULL;
+    CHECK(rec.protocol_info == 2);                     /* SSH-2 */
+    pthread_mutex_unlock(&rec.lock);
+
+    spb_settings_set(s, "Cipher", "chacha20,aes,aesgcm,3des,WARN,des,blowfish,arcfour");
+    spb_settings_set(s, "PingIntervalSecs", "30");     /* keepalives on */
+    spb_session_reconfigure(session, s, 8);
+    spb_settings_free(s);
+    CHECK(wait_rec(is_reconfigured, 10));
+    CHECK(wait_rec(rekeyed, 20));
+
+    /* Same connection, shell still there. */
+    type("echo still-$((5*5))\r");
+    CHECK(wait_screen("\nstill-25\n", 20));
+    CHECK(spb_session_transport_id(session) == transport);
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.state == SPB_SESSION_CONNECTED);
+    pthread_mutex_unlock(&rec.lock);
+
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+}
+
 static void test_accept_once_and_cancel(void)
 {
     /* A second server on another port: its key is not cached. */
@@ -483,6 +571,7 @@ int main(void)
     fixture server = fixture_start("hostkey-a.ppk", 0);
     test_first_connection(&server);
     test_stored_key_and_wrong_password(&server);
+    test_live_reconfigure(&server);
     test_accept_once_and_cancel();
     test_changed_host_key(&server);
 

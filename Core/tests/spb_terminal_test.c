@@ -64,6 +64,8 @@ typedef struct events {
     int paste_requests;
     int paste_which;
     int resize_cols, resize_rows;
+    spb_settings *exported;
+    int reconfigured;
 } events;
 
 static events ev = {
@@ -108,6 +110,15 @@ static void cb_resize(void *ctx, int32_t cols, int32_t rows)
     WITH_EVENTS(ev.resize_cols = cols; ev.resize_rows = rows);
 }
 static void cb_released(void *ctx) { WITH_EVENTS(ev.released = true); }
+static void cb_exported(void *ctx, uint64_t request, spb_settings *settings,
+                        int32_t info)
+{
+    WITH_EVENTS(spb_settings_free(ev.exported); ev.exported = settings);
+}
+static void cb_reconfigured(void *ctx, uint64_t request, const char *error)
+{
+    WITH_EVENTS(if (!error) ev.reconfigured++);
+}
 
 static const spb_session_callbacks callbacks = {
     .state_changed = cb_state,
@@ -118,6 +129,8 @@ static const spb_session_callbacks callbacks = {
     .paste_requested = cb_paste,
     .resize_requested = cb_resize,
     .released = cb_released,
+    .settings_exported = cb_exported,
+    .reconfigured = cb_reconfigured,
 };
 
 typedef bool (*ev_pred)(void);
@@ -699,6 +712,91 @@ static void test_output_is_coalesced(void)
 
 static void test_close_and_release(void);
 
+static bool is_exported(void) { return ev.exported != NULL; }
+static int want_reconfigured;
+static bool is_reconfigured(void) { return ev.reconfigured >= want_reconfigured; }
+
+/* Change Settings on the running session: export, edit, apply. */
+static spb_settings *export_running(void)
+{
+    WITH_EVENTS(spb_settings_free(ev.exported); ev.exported = NULL);
+    spb_session_export_settings(session, 1);
+    CHECK(wait_events(is_exported, 10));
+    pthread_mutex_lock(&ev.lock);
+    spb_settings *s = ev.exported;
+    ev.exported = NULL;
+    pthread_mutex_unlock(&ev.lock);
+    return s;
+}
+
+static void apply(spb_settings *s)
+{
+    pthread_mutex_lock(&ev.lock);
+    want_reconfigured = ev.reconfigured + 1;
+    pthread_mutex_unlock(&ev.lock);
+    spb_session_reconfigure(session, s, 2);
+    CHECK(wait_events(is_reconfigured, 10));
+}
+
+static bool pred_default_fg(const void *arg)
+{
+    return info.default_fg == *(const uint32_t *)arg;
+}
+
+static bool pred_scroll_total(const void *arg)
+{
+    return info.scroll_total == *(const int *)arg;
+}
+
+/* M07: settings changed while connected take effect at once. */
+static void test_live_reconfigure(void)
+{
+    /* The live window title becomes the configured one (term_pre_reconfig),
+     * so an untouched title field keeps it. */
+    int size[2] = { 90, 25 };
+    spb_session_resize(session, 90, 25, 720, 400);
+    CHECK(wait_frame(pred_size, size, 10));
+    peer_write("\033]0;Live Title\007");
+    sync_terminal();
+    spb_settings *s = export_running();
+    CHECK(s && !strcmp(spb_settings_get(s, "WinTitle"), "Live Title"));
+    CHECK(s && !strcmp(spb_settings_get(s, "BackspaceIsDelete"), "0"));
+    /* The size is the window's, not the one configured at the start. */
+    char cols[16], rows[16];
+    snprintf(cols, sizeof(cols), "%d", info.cols);
+    snprintf(rows, sizeof(rows), "%d", info.rows);
+    CHECK(s && !strcmp(spb_settings_get(s, "TermWidth"), cols));
+    CHECK(s && !strcmp(spb_settings_get(s, "TermHeight"), rows));
+
+    /* Keyboard: back to ^? and ESC[n~ function keys. */
+    spb_settings_set(s, "BackspaceIsDelete", "1");
+    spb_settings_set(s, "LinuxFunctionKeys", "0");
+    /* Colours: a new default foreground. */
+    spb_settings_set(s, "Colour0", "10,20,30");
+    /* Scrollback: fewer lines kept. */
+    spb_settings_set(s, "ScrollbackLines", "10");
+    apply(s);
+    spb_settings_free(s);
+
+    spb_session_key(session, SPB_KEY_BACKSPACE, 0);
+    EXPECT_SENT("Backspace after reconfigure", "\177");
+    spb_session_key(session, SPB_KEY_F1, 0);
+    EXPECT_SENT("F1 after reconfigure", "\033[11~");
+    uint32_t fg = 0x0A141E;
+    CHECK(wait_frame(pred_default_fg, &fg, 10));
+    for (int i = 0; i < 60; i++)
+        peer_write("line\r\n");
+    sync_terminal();
+    int limit = 10 + info.rows;         /* exactly 10 lines of scrollback */
+    CHECK(wait_frame(pred_scroll_total, &limit, 10));
+
+    /* The running settings now read back as applied. */
+    s = export_running();
+    CHECK(s && !strcmp(spb_settings_get(s, "Colour0"), "10,20,30"));
+    CHECK(s && !strcmp(spb_settings_get(s, "ScrollbackLines"), "10"));
+    spb_settings_free(s);
+}
+
 /* ---------- A second session with non-default settings (M06) ---------- */
 
 static const char *const configured[] = {
@@ -776,6 +874,7 @@ static void test_configured_session(void)
     CHECK(wait_frame(pred_cursor_shown, &shown, 5));
     CHECK(wait_frame(pred_cursor_shown, &hidden, 5));
 
+    test_live_reconfigure();
     test_close_and_release();
 }
 

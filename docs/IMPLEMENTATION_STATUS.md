@@ -9,7 +9,7 @@
 | **M04** | Basic SSH session | **COMPLETE** (2026-10-14) |
 | **M05** | Saved sessions and PuTTY config UI | **COMPLETE** (2026-10-15) |
 | **M06** | Terminal parity | **COMPLETE** (2026-10-15) |
-| M07 | Live session reconfiguration framework | NOT STARTED |
+| **M07** | Live session reconfiguration framework | **COMPLETE** (2026-10-15) |
 | M08 | SSH tunnels + live tunnel reconfiguration | NOT STARTED |
 | M09 | SSH authentication and connection parity | NOT STARTED |
 | M10 | Event log and session operations | NOT STARTED |
@@ -20,6 +20,82 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M07 — Live session reconfiguration framework
+
+**Delivered**
+
+- **Change Settings** (D-031): Session > Change Settings… (⇧⌘,) opens the
+  configuration dialog as a sheet on the session window, started from the
+  running settings (with the live window title, as `term_pre_reconfig`).
+  Mid-session it is PuTTY's: Apply instead of Open, no About, Save only
+  ("Save the current session settings"), and what `config.c` hides with
+  `midsession` hidden. One Change Settings at a time per session.
+- **Apply without reconnecting**: the core installs the new `Conf` and
+  runs GTK PuTTY's sequence (`log_reconfig`, `ldisc_configure` /
+  `ldisc_echoedit_update`, `term_reconfig`, clipboards, `backend_reconfig`,
+  character set, scrollback size, redraw). Keepalives, cipher and
+  compression changes (PuTTY re-keys the same connection), logging,
+  keyboard, terminal, colours, selection and bell settings take effect at
+  once. The window follows font, border, scrollbar and size changes; window
+  options (always on top, icon title, ...) are reapplied.
+- **R-3 closed**: PuTTY's unsaved keys keep their running values; a
+  self-check sets every `conf_key_info[]` key to a non-default value and
+  proves export → reconfigure changes nothing, and fails if the overlay is
+  removed (verified by breaking it on purpose).
+- **Bridge API v7**: `spb_session_export_settings` /
+  `spb_session_reconfigure` with `settings_exported` / `reconfigured`
+  callbacks (request numbers; the main thread never waits),
+  `spb_session_transport_id`, `spb_debug_check_reconfigure_roundtrip`.
+  `spb_session_copy_settings` now returns the creation-time settings
+  (thread-safe). The running `TermWidth` / `TermHeight` follow the window,
+  as GTK's.
+- **Swift**: `PuTTYSession.exportSettings` / `reconfigure` / `transportID`;
+  `SessionController.beginChangeSettings` / `applyChangeSettings` /
+  `cancelChangeSettings` (async), `settings` now the running settings;
+  `SessionTerminalDelegate.terminal(_:settingsChangedFrom:to:)`;
+  `ConfigurationModel(changing:protocolInfo:store:)`.
+- A pending log file question is withdrawn when Change Settings reopens
+  the log (the M05 limitation).
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| C tests (R-3 round trip over every key; Raw: export, no-op apply, logging turned on mid-session, transport unchanged; terminal: size and live title exported, Backspace / function keys / colour / scrollback changed live; SSH: SSH-2 reported, cipher change re-keys the same connection to ChaCha20, shell still works) | Passed |
+| `leaks --atExit`: all four C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan / TSan (Debug) | Passed, no reports |
+| `swift test` (88 tests, 17 suites; new: Change Settings through `SessionController`, live effects through a real `TerminalView` incl. window resize, mid-session dialog rules) | 88/88 passed |
+| `swift test --sanitize=address` / `--sanitize=thread` | 88/88 passed, no reports |
+| App Debug build; Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
+
+**Manual interoperability check** against the LAN OpenSSH 10.2p1 server,
+through the bridge as the app uses it: password login; running settings
+exported (SSH-2); new cipher order, keepalives and width applied; OpenSSH
+re-keyed ("Initiating key re-exchange (cipher settings changed)", then
+ChaCha20 both ways); the shell kept working; the transport id did not
+change.
+
+**Problems found and fixed during M07**
+
+- `spb_session_copy_settings` read the session's `Conf` from the caller's
+  thread, which reconfiguration would make a data race; it now returns a
+  snapshot taken at creation.
+- Without the running size kept in the `Conf`, a font change would have
+  snapped a resized window back to its original size.
+- A row of the parity table had a `|` inside a cell, which split it.
+
+**Limitations / not done**
+
+- The Change Settings sheet in the running app was build-checked and its
+  pieces tested (model, controller, view), not clicked through by hand.
+- Tunnel editing and its staging, and the SSH panels (ciphers, kex,
+  rekey limits) in the dialog, arrive with M08 and M09; until then those
+  settings change only through saved sessions or tests.
+- No Event Log summary of what changed (PuTTY has none either; the Event
+  Log window is M10).
 
 ## M06 — Terminal parity
 

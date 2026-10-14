@@ -13,6 +13,20 @@ public protocol SessionTerminalDelegate: AnyObject {
     /// Answer with `PuTTYSession.paste(_:)`.
     func terminal(_ controller: SessionController, requestsPasteFrom clipboard: PuTTYClipboard)
     func terminal(_ controller: SessionController, requestsResizeTo columns: Int, rows: Int)
+    /// Change Settings was applied: the frontend's own settings (font,
+    /// size, scrollbar, window options) may have changed.
+    func terminal(_ controller: SessionController, settingsChangedFrom old: PuTTYSettings,
+                  to new: PuTTYSettings)
+}
+
+/// What Change Settings starts from.
+public struct RunningSettings: Sendable, Equatable {
+    /// The running settings, with the live window title as the
+    /// configured one (PuTTY's `term_pre_reconfig`).
+    public var settings: PuTTYSettings
+    /// PuTTY's `backend_cfg_info`: 0 unknown or no connection, 1 SSH-1,
+    /// 2 SSH-2, -1 connection-sharing downstream.
+    public var protocolInfo: Int32
 }
 
 /// The main-actor model of one PuTTY session: what a session window
@@ -28,7 +42,12 @@ public final class SessionController {
     /// Bytes of received output kept in ``transcript``.
     public static let transcriptLimit = 1 << 20
 
-    public let settings: PuTTYSettings
+    /// The settings the session runs with: as created, then as last
+    /// applied by Change Settings.
+    public private(set) var settings: PuTTYSettings
+    /// Whether a Change Settings is open or being applied (PuTTY allows
+    /// one at a time).
+    public private(set) var isChangingSettings = false
 
     public private(set) var state: PuTTYSessionState = .created
     /// Why the session reached its current state, if known (for example
@@ -60,6 +79,9 @@ public final class SessionController {
     @ObservationIgnored public weak var terminalDelegate: SessionTerminalDelegate?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var stateWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var nextRequest: UInt64 = 1
+    @ObservationIgnored private var exportWaiters: [UInt64: CheckedContinuation<RunningSettings?, Never>] = [:]
+    @ObservationIgnored private var reconfigureWaiters: [UInt64: CheckedContinuation<String?, Never>] = [:]
 
     public init(settings: PuTTYSettings) {
         self.settings = settings
@@ -79,6 +101,7 @@ public final class SessionController {
                 guard let self else { return }
                 self.apply(event)
             }
+            self?.answerOutstandingRequests()
         }
     }
 
@@ -101,6 +124,60 @@ public final class SessionController {
 
     public func sendEOF() {
         session?.sendEOF()
+    }
+
+    // MARK: Change Settings (M07)
+
+    /// Starts Change Settings: the running settings to edit, or nil if
+    /// there is no session or another Change Settings is open.
+    public func beginChangeSettings() async -> RunningSettings? {
+        guard let session, !isChangingSettings else { return nil }
+        isChangingSettings = true
+        let request = takeRequest()
+        let running = await withCheckedContinuation { continuation in
+            exportWaiters[request] = continuation
+            session.exportSettings(request: request)
+        }
+        if running == nil { isChangingSettings = false }
+        return running
+    }
+
+    /// Ends Change Settings without applying anything (Cancel).
+    public func cancelChangeSettings() {
+        isChangingSettings = false
+    }
+
+    /// Ends Change Settings by applying `newSettings` to the running
+    /// session (Apply). Returns an error message, or nil on success.
+    @discardableResult
+    public func applyChangeSettings(_ newSettings: PuTTYSettings) async -> String? {
+        defer { isChangingSettings = false }
+        guard let session else { return "The session no longer exists" }
+        let request = takeRequest()
+        let error = await withCheckedContinuation { continuation in
+            reconfigureWaiters[request] = continuation
+            session.reconfigure(newSettings, request: request)
+        }
+        if error == nil {
+            let old = settings
+            // What the running Conf now holds, as PuTTY saves it.
+            settings = newSettings.normalised()
+            terminalDelegate?.terminal(self, settingsChangedFrom: old, to: settings)
+        }
+        return error
+    }
+
+    /// The session is gone: nobody will answer what is still asked.
+    private func answerOutstandingRequests() {
+        exportWaiters.values.forEach { $0.resume(returning: nil) }
+        exportWaiters.removeAll()
+        reconfigureWaiters.values.forEach { $0.resume(returning: "The session has ended") }
+        reconfigureWaiters.removeAll()
+    }
+
+    private func takeRequest() -> UInt64 {
+        defer { nextRequest += 1 }
+        return nextRequest
     }
 
     /// Answers a pending prompt.
@@ -164,6 +241,11 @@ public final class SessionController {
             pendingPrompts.append(prompt)
         case .promptCancelled(let id):
             pendingPrompts.removeAll { $0.id == id }
+        case .settingsExported(let request, let exported, let info):
+            exportWaiters.removeValue(forKey: request)?
+                .resume(returning: RunningSettings(settings: exported, protocolInfo: info))
+        case .reconfigured(let request, let error):
+            reconfigureWaiters.removeValue(forKey: request)?.resume(returning: error)
         }
     }
 }

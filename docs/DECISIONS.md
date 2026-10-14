@@ -527,3 +527,41 @@ upstream has it. Windows-only options with no macOS meaning (PC speaker,
 logical palettes, Windows mouse-button mode with its context menu, RTF
 copy, system colours, resize-by-font) stay out until a later milestone
 decides them.
+
+## D-031 — Change Settings: GTK PuTTY's flow, asynchronous, one at a time
+
+**Status:** Accepted (M07); implements D-005 and ARCHITECTURE §6; API v7
+**Context:** PuTTY reconfigures a live session by replacing its whole
+`Conf` and calling the reconfigure functions in a fixed order; GTK PuTTY
+edits a copy in a non-modal dialog and swaps it in on Apply. The main
+thread must never wait for the core thread (D-017).
+**Decision:**
+- `spb_session_export_settings` returns the running settings (with the
+  live window title, `term_pre_reconfig`) and `backend_cfg_info`;
+  `spb_session_reconfigure` applies a settings map. Both answer through
+  callbacks with a request number; `SessionController` turns them into
+  `async` calls and allows one Change Settings at a time.
+- The new `Conf` is loaded from the settings, then PuTTY's unsaved keys
+  (which `load_open_settings` resets) are copied from the running `Conf`.
+  This is the §6.3 overlay, built from the other side; a self-check sets
+  every key to a non-default value and proves nothing changes across
+  export and reconfigure (R-3), and fails if the overlay is removed.
+- Order, as GTK's `after_change_settings_dialog`: `log_reconfig`,
+  `ldisc_configure` + `ldisc_echoedit_update`, `term_reconfig`,
+  clipboards, `backend_reconfig`, then character set, cached values,
+  scrollback size and a full redraw. A pending log file question is
+  withdrawn if the log is reopened. The frontend then applies font,
+  border, scrollbar and window options and resizes the window when the
+  size, font, border or scrollbar changed.
+- As GTK's `drawing_area_setup`, the running `TermWidth` / `TermHeight`
+  follow the window, so the dialog shows the current size.
+- The dialog is the configuration window in mid-session mode, shown as a
+  sheet on the session window (Session > Change Settings…, ⇧⌘,): Apply
+  instead of Open, no About, and what `config.c` hides with `midsession`
+  hidden (destination, Load/Delete, Connection's TCP / IP version /
+  logical host, Connection/Data; SSH logging only for SSH). Save stays
+  ("Save the current session settings").
+**Consequences:** No reconnection, ever: settings that need a new
+connection are not offered, and a change PuTTY handles by re-keying
+(ciphers, compression, rekey limits) re-keys the same connection.
+Tunnel edits, with their staging (§6.4), build on this in M08.

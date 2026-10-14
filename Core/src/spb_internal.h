@@ -74,6 +74,9 @@ struct spb_session {
     struct spb_pending_prompt *prompt;
     struct spb_pending_prompt *log_prompt;
 
+    atomic_uint_fast64_t transport_id; /* bumped by each backend_init */
+    spb_settings *created_settings;    /* as created; immutable, any thread */
+
     bool active;                       /* in the active-session list */
     spb_session *active_next, *active_prev;
 };
@@ -92,6 +95,10 @@ void spb_session_emit_output(spb_session *s, const void *data, size_t len,
 void spb_session_notify_remote_exit(spb_session *s);
 void spb_session_connection_fatal(spb_session *s, const char *message);
 
+/* The Conf a reconfiguration installs: every saved keyword from
+ * settings, unsaved keys from the running Conf (ARCHITECTURE 6.3). */
+Conf *spb_conf_for_reconfigure(const spb_settings *settings, Conf *running);
+
 /* spb_seat.c: the session's Seat and LogPolicy */
 void spb_seat_init(spb_session *s);
 /* Forget the connection's pending dialog without answering (the
@@ -105,6 +112,10 @@ struct spb_screen *spb_screen_new(void);         /* any thread */
 void spb_screen_free(struct spb_screen *screen); /* after the terminal */
 void spb_terminal_create(spb_session *s);        /* core thread */
 void spb_terminal_free(spb_session *s);          /* core thread */
+/* After term_reconfig and backend_reconfig: what GTK PuTTY's frontend
+ * does next (character set, cached values, clipboards, scrollback size,
+ * redraw). oldconf is the configuration before the change. */
+void spb_terminal_reconfigure(spb_session *s, Conf *oldconf);
 void spb_terminal_resize(spb_session *s, int cols, int rows,
                          int pixel_width, int pixel_height);
 bool spb_terminal_window_pixel_size(spb_session *s, int *w, int *h);

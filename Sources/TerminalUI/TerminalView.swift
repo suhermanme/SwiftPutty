@@ -66,13 +66,14 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public let screen = TerminalScreen()
     public private(set) var renderer: TerminalRenderer
 
-    public let options: TerminalViewOptions
+    public private(set) var options: TerminalViewOptions
     /// Space between the window edge and the cells.
     public var border: CGFloat { options.border }
 
     private let scroller = NSScroller()
     private var showsScrollbar: Bool { options.showsScrollbar }
     private var bellSound: NSSound?
+    private var observingIconTitle = false
     private var markedText = NSMutableAttributedString()
     private var lastSelection = ""
     private var gridSize = (columns: 0, rows: 0)
@@ -521,24 +522,65 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     private func applyWindowOptions() {
         guard let window else { return }
-        if options.alwaysOnTop {
-            window.level = .floating
-        }
+        window.level = options.alwaysOnTop ? .floating : .normal
+        // Left alone otherwise, so the minimised title follows the title.
         if options.separateIconTitle {
             window.miniwindowTitle = controller.iconTitle.isEmpty ? window.title : controller.iconTitle
         }
     }
 
     private func observeIconTitle() {
-        guard options.separateIconTitle else { return }
+        guard options.separateIconTitle, !observingIconTitle else { return }
+        observingIconTitle = true
         withObservationTracking {
             _ = controller.iconTitle
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
+                self?.observingIconTitle = false
                 self?.applyWindowOptions()
                 self?.observeIconTitle()
             }
         }
+    }
+
+    // MARK: Change Settings
+
+    /// GTK PuTTY's after_change_settings_dialog, frontend half: new font,
+    /// scrollbar, border and window options; the window is resized to the
+    /// configured size if that, the font, the border or the scrollbar
+    /// changed.
+    public func terminal(_ controller: SessionController, settingsChangedFrom old: PuTTYSettings,
+                         to new: PuTTYSettings) {
+        let previous = options
+        options = TerminalViewOptions(settings: new)
+        if options.fontName != previous.fontName {
+            renderer = TerminalRenderer(font: TerminalFont(puttyFontName: options.fontName))
+        }
+        if options.bellSoundFile != previous.bellSoundFile {
+            bellSound = nil
+        }
+        scroller.isHidden = !options.showsScrollbar
+        if previous.separateIconTitle && !options.separateIconTitle, let window {
+            window.miniwindowTitle = window.title
+        }
+        applyWindowOptions()
+        observeIconTitle()
+
+        let columns = Int(new["TermWidth"] ?? "") ?? gridSize.columns
+        let rows = Int(new["TermHeight"] ?? "") ?? gridSize.rows
+        let needsSize = old["TermWidth"] != new["TermWidth"] || old["TermHeight"] != new["TermHeight"]
+            || options.border != previous.border || options.fontName != previous.fontName
+            || options.showsScrollbar != previous.showsScrollbar
+            || options.scrollbarOnLeft != previous.scrollbarOnLeft
+        if needsSize {
+            gridSize = (0, 0)               // tell the terminal the size again
+            if window != nil {
+                terminal(controller, requestsResizeTo: columns, rows: rows)
+            }
+            setFrameSize(frame.size)
+        }
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
     }
 
     private func flashVisualBell() {

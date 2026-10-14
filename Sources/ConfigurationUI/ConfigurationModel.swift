@@ -13,7 +13,7 @@ import PuTTYBridge
 /// destination. Places where PuTTY beeps call ``beep``.
 @MainActor
 @Observable
-public final class ConfigurationModel {
+public final class ConfigurationModel: Identifiable {
     /// The settings being edited.
     public var settings: PuTTYSettings
     /// The "Saved Sessions" edit box.
@@ -29,6 +29,12 @@ public final class ConfigurationModel {
     /// An error to show (PuTTY's `dlg_error_msg`).
     public var errorMessage: String?
 
+    /// Change Settings on a running session (PuTTY's `midsession`):
+    /// settings that only a new connection could use are not shown.
+    public let isMidSession: Bool
+    /// Mid-session: PuTTY's `backend_cfg_info` (2 for SSH-2).
+    public let protocolInfo: Int32
+
     @ObservationIgnored public var beep: () -> Void
     @ObservationIgnored private let store: SavedSessionStore
 
@@ -36,6 +42,8 @@ public final class ConfigurationModel {
     public init(store: SavedSessionStore, beep: @escaping () -> Void = {}) {
         self.store = store
         self.beep = beep
+        isMidSession = false
+        protocolInfo = 0
         do {
             settings = try store.loadDefaults()
         } catch {
@@ -43,6 +51,23 @@ public final class ConfigurationModel {
             errorMessage = error.localizedDescription
         }
         refreshSessionNames()
+    }
+
+    /// Change Settings: starts from the running session's settings.
+    public init(changing running: PuTTYSettings, protocolInfo: Int32,
+                store: SavedSessionStore, beep: @escaping () -> Void = {}) {
+        self.store = store
+        self.beep = beep
+        isMidSession = true
+        self.protocolInfo = protocolInfo
+        settings = running
+        refreshSessionNames()
+    }
+
+    /// config.c shows the SSH packet logging options for SSH sessions
+    /// only once a session runs; before, whenever SSH is available.
+    public var showsSSHLogging: Bool {
+        !isMidSession || connectionType == "ssh"
     }
 
     // MARK: - Destination
@@ -115,13 +140,16 @@ public final class ConfigurationModel {
     /// The Load button. Returns false (and beeps) with nothing selected.
     @discardableResult
     public func loadSelectedSession() -> Bool {
-        loadSelected(into: &settings) != nil
+        guard !isMidSession else { return false }
+        return loadSelected(into: &settings) != nil
     }
 
     /// A double-click in the list: loads the session, and returns the
     /// settings to open if PuTTY would start it at once (a saved
-    /// session, not "Default Settings", with a destination).
+    /// session, not "Default Settings", with a destination). Nothing
+    /// mid-session, where sessions cannot be loaded.
     public func openSessionFromList() -> PuTTYSettings? {
+        guard !isMidSession else { return nil }
         guard let isDefault = loadSelected(into: &settings) else { return nil }
         return !isDefault && isLaunchable ? settings : nil
     }
@@ -149,6 +177,7 @@ public final class ConfigurationModel {
     /// The Delete button. "Default Settings" (the first entry) cannot be
     /// deleted.
     public func deleteSelectedSession() {
+        guard !isMidSession else { return }
         guard let index = selectedSessionIndex, index > 0, index < sessionNames.count else {
             beep()
             return
@@ -170,6 +199,10 @@ public final class ConfigurationModel {
     /// had the focus and a saved session with a destination is selected,
     /// that session is loaded and opened.
     public func open() -> PuTTYSettings? {
+        // "In a mid-session Change Settings, Apply is always OK."
+        if isMidSession {
+            return settings
+        }
         if sessionListWasLastFocused && !isLaunchable {
             var candidate = settings
             guard let isDefault = loadSelected(into: &candidate) else {

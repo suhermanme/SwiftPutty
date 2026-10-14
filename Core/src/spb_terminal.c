@@ -638,6 +638,29 @@ void spb_screen_free(struct spb_screen *sc)
     sfree(sc);
 }
 
+/* unix/window.c after_change_settings_dialog, after backend_reconfig */
+void spb_terminal_reconfigure(spb_session *s, Conf *oldconf)
+{
+    Conf *conf = s->conf;
+    if (strcmp(conf_get_str(oldconf, CONF_line_codepage),
+               conf_get_str(conf, CONF_line_codepage)) ||
+        conf_get_bool(oldconf, CONF_utf8_override) !=
+        conf_get_bool(conf, CONF_utf8_override) ||
+        conf_get_int(oldconf, CONF_vtmode) != conf_get_int(conf, CONF_vtmode))
+        init_ucs(&s->ucsdata, conf_get_str(conf, CONF_line_codepage),
+                 conf_get_bool(conf, CONF_utf8_override), CS_UTF8,
+                 conf_get_int(conf, CONF_vtmode));
+    apply_conf(s);
+    setup_clipboards(s->term, conf);
+    /* A new size comes from the frontend's window; scrollback alone is
+     * applied here, as GTK does. */
+    if (conf_get_int(oldconf, CONF_savelines) !=
+        conf_get_int(conf, CONF_savelines))
+        term_size(s->term, s->term->rows, s->term->cols,
+                  conf_get_int(conf, CONF_savelines));
+    term_invalidate(s->term);
+}
+
 void spb_terminal_resize(spb_session *s, int cols, int rows,
                          int pixel_width, int pixel_height)
 {
@@ -646,6 +669,10 @@ void spb_terminal_resize(spb_session *s, int cols, int rows,
         return;
     sc->pixel_width = pixel_width;
     sc->pixel_height = pixel_height;
+    /* As GTK's drawing_area_setup: the running Conf follows the window,
+     * so Change Settings shows (and keeps) the current size. */
+    conf_set_int(s->conf, CONF_width, cols);
+    conf_set_int(s->conf, CONF_height, rows);
     if (cols != sc->cols || rows != sc->rows) {
         pthread_mutex_lock(&sc->lock);
         reallocate(sc, cols, rows);

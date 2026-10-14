@@ -23,7 +23,7 @@ struct SwiftPuttyApp: App {
 
         WindowGroup("Session", id: WindowID.session, for: SessionRequest.self) { $request in
             if let request {
-                SessionWindow(request: request)
+                SessionWindow(request: request, store: appDelegate.model.sessionStore)
             } else {
                 // A restored window whose request no longer decodes.
                 ClosingWindow()
@@ -52,8 +52,19 @@ enum WindowID {
     static let session = "session"
 }
 
+/// What the focused session window offers to the menus.
+struct SessionActions {
+    var changeSettings: () -> Void
+    var canChangeSettings: Bool
+}
+
+extension FocusedValues {
+    @Entry var sessionActions: SessionActions?
+}
+
 private struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.sessionActions) private var sessionActions
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
@@ -67,6 +78,14 @@ private struct AppCommands: Commands {
                 openWindow(id: WindowID.configuration)
             }
             .keyboardShortcut("n")
+        }
+        // PuTTY's window menu entries for the session (more in M10).
+        CommandMenu("Session") {
+            Button("Change Settings…") {
+                sessionActions?.changeSettings()
+            }
+            .keyboardShortcut(",", modifiers: [.command, .shift])
+            .disabled(sessionActions?.canChangeSettings != true)
         }
         CommandGroup(after: .pasteboard) {
             Button("Copy All to Clipboard") {
