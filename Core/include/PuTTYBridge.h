@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 7
+#define SPB_API_VERSION 8
 
 /* ---------- Library information ---------- */
 
@@ -225,6 +225,26 @@ typedef enum spb_prompt_answer {
     SPB_ANSWER_LOG_APPEND,       /* API v5 */
 } spb_prompt_answer;
 
+/* The state of one configured port forwarding (API v8). key and value
+ * are its PortForwardings entry, as PuTTY's Conf holds it: key such as
+ * "L8080", "4R2222" or "L127.0.0.1:8080" (dynamic forwardings are "L..."
+ * with value "D"), value "host:port" or "D". */
+typedef enum spb_portfwd_state {
+    SPB_PORTFWD_LISTENING,         /* local or dynamic: listening */
+    SPB_PORTFWD_LISTEN_FAILED,     /* local or dynamic: could not listen */
+    SPB_PORTFWD_REMOTE_REQUESTED,  /* remote: asked the server */
+    SPB_PORTFWD_REMOTE_ENABLED,    /* remote: the server accepted */
+    SPB_PORTFWD_REMOTE_REFUSED,    /* remote: the server refused */
+    SPB_PORTFWD_DUPLICATE,         /* remote: listening address taken */
+    SPB_PORTFWD_CLOSED,            /* removed by reconfiguration */
+} spb_portfwd_state;
+
+typedef struct spb_portfwd_status {
+    spb_portfwd_state state;
+    const char *key, *value;
+    const char *message;           /* error text, or NULL */
+} spb_portfwd_status;
+
 typedef enum spb_session_state {
     SPB_SESSION_CREATED,      /* not started yet */
     SPB_SESSION_CONNECTING,   /* started; the backend is not ready for input */
@@ -292,6 +312,16 @@ typedef struct spb_session_callbacks {
                               spb_settings *settings, int32_t protocol_info);
     /* Answer to spb_session_reconfigure: error is NULL on success. */
     void (*reconfigured)(void *ctx, uint64_t request, const char *error);
+
+    /* --- Port forwarding (M08, API v8) --- */
+
+    /* A configured forwarding changed state: when it is set up (at
+     * connection or by reconfiguration), when a remote one is answered,
+     * and when one is removed. Local and dynamic results arrive before
+     * the reconfigured callback of the change that caused them; remote
+     * answers when the server replies. Nothing is reported when the
+     * connection ends: every forwarding goes with it. */
+    void (*portfwd_status)(void *ctx, const spb_portfwd_status *status);
 } spb_session_callbacks;
 
 /*

@@ -221,9 +221,9 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Remote command (`CONF_remote_cmd`) | Multiline text | NOT STARTED | reconnect | |
-| Don't start a shell (`CONF_ssh_no_shell`) | Checkbox | NOT STARTED | reconnect | Useful for tunnel-only sessions |
-| Enable compression (`CONF_compression`) | Checkbox | NOT STARTED | runtime | SSH-2: triggers an immediate rekey (`ssh2_transport_reconfigure`). Hidden mid-session on SSH-1 |
+| Remote command (`CONF_remote_cmd`) | Edit box (single line, as config.c) | COMPLETE | reconnect | |
+| Don't start a shell (`CONF_ssh_no_shell`) | Checkbox | COMPLETE | reconnect | Useful for tunnel-only sessions |
+| Enable compression (`CONF_compression`) | Checkbox | COMPLETE | runtime | SSH-2: triggers an immediate rekey (`ssh2_transport_reconfigure`). Hidden mid-session on SSH-1 |
 | Share SSH connections (`CONF_ssh_connection_sharing`, `_upstream`, `_downstream`) | Checkboxes | NOT STARTED | reconnect | Unix sharing via `unix/sharing.c` (Unix-domain socket in a private dir) |
 | SSH protocol version (`CONF_sshprot`) | Radio 2 / 1 (SSH-1 hidden behind "legacy") | NOT STARTED | reconnect | |
 
@@ -272,9 +272,9 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | X display location (`CONF_x11_display`) | Text field | NOT STARTED | reconnect | |
 | Remote X11 auth protocol (`CONF_x11_auth`) | Radio MIT-Magic-Cookie-1 / XDM-Authorization-1 | NOT STARTED | reconnect | |
 | X authority file (`CONF_xauthfile`) | File chooser | NOT STARTED | reconnect | |
-| **Local ports accept connections from other hosts (`CONF_lport_acceptall`)** | Checkbox | NOT STARTED | future | Read by `pfl_listen` only when a listener is *created*; existing listeners keep their bind |
-| **Remote ports do the same (`CONF_rport_acceptall`)** | Checkbox | NOT STARTED | future | Used only for *newly requested* remote forwards with no explicit bind address |
-| **Forwarded ports list (`CONF_portfwd`)** — add/remove L, R, D, Auto/IPv4/IPv6, optional bind address | Table + Add/Remove/**Edit** sheet; per-row live status (Listening / Failed / Requested / Enabled / Refused) | NOT STARTED | **runtime** | `portfwdmgr_config`. Edit = staged remove+add (ARCHITECTURE §6.4). SSH-1: remote removal unsupported |
+| **Local ports accept connections from other hosts (`CONF_lport_acceptall`)** | Checkbox | COMPLETE | future | Read by `pfl_listen` only when a listener is *created*; existing listeners keep their bind |
+| **Remote ports do the same (`CONF_rport_acceptall`)** | Checkbox | COMPLETE | future | Used only for *newly requested* remote forwards with no explicit bind address |
+| **Forwarded ports list (`CONF_portfwd`)** — add/remove L, R, D, Auto/IPv4/IPv6, optional bind address | config.c's list, Remove (fills the fields) / Add; mid-session each row shows its live state (Listening / Failed / Requested / Enabled / Refused / Duplicate) | COMPLETE | **runtime** | `portfwdmgr_config` (patch 0006 for status). Remove-then-Add is an edit, staged (ARCHITECTURE §6.4, D-032): a failed change keeps the old forwarding. A second remote forwarding on the same server port is refused before Apply (H-2). SSH-1: remote removal unsupported upstream |
 | SSH server bug workarounds (`CONF_sshbug_*`, 15 keys) | Popup Auto/Off/On each | NOT STARTED | reconnect | |
 
 ## Connection → Serial

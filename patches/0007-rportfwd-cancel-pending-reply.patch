@@ -1,0 +1,135 @@
+SwiftPutty local patch 0007
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (memory safety)
+
+Fix a use after free when a remote port forwarding is removed while the
+server's reply to its tcpip-forward request is still outstanding
+(docs/ARCHITECTURE.md section 5.6, hazard H-1).
+
+ssh2_rportfwd_alloc() queues a global-request reply handler whose
+context is the ssh_rportfwd. If a reconfiguration removes the
+forwarding before the reply arrives, ssh2_rportfwd_remove() freed it,
+and ssh2_rportfwd_globreq_response() then read the freed record
+(log_description; on failure also del234 with a comparator reading
+shost, and portfwdmgr_close(rpf->pfr)). Any client that changes
+forwardings mid-session can hit this within one round trip of adding a
+remote forwarding; reproduced under AddressSanitizer by two
+reconfigurations queued back to back (Core/tests/spb_ssh_test.c).
+
+Now a record whose reply is pending is marked removed, taken out of the
+tree (so the same listening address can be requested again), detached
+from its PortFwdRecord (which the caller frees), and kept on a list in
+the connection layer; the reply handler frees it and does nothing else.
+The cancel-tcpip-forward already sent follows the request on the wire,
+so the server ends up without the listener whatever its answer was.
+ssh2_connection_free() frees records still on that list, and also the
+queue of outstanding global requests, which it previously leaked if
+replies were pending at teardown.
+
+--- a/ssh.h
++++ b/ssh.h
+@@ -207,6 +207,14 @@
+     char *log_description; /* name of remote listening port, for logging */
+     ssh_sharing_connstate *share_ctx;
+     PortFwdRecord *pfr;
++    /*
++     * SSH-2 client: the server has not answered our tcpip-forward yet.
++     * A forwarding removed meanwhile is only marked removed (its pfr is
++     * gone), kept on the connection's removed list, and freed when the
++     * answer arrives, because the pending answer still refers to it.
++     */
++    bool reply_pending, removed;
++    struct ssh_rportfwd *next_removed;
+ };
+ void free_rportfwd(struct ssh_rportfwd *rpf);
+ 
+--- a/ssh/connection2-client.c
++++ b/ssh/connection2-client.c
+@@ -214,6 +214,23 @@
+     PacketProtocolLayer *ppl = &s->ppl; /* for ppl_logevent */
+     struct ssh_rportfwd *rpf = (struct ssh_rportfwd *)ctx;
+ 
++    rpf->reply_pending = false;
++    if (rpf->removed) {
++        /*
++         * Removed while this reply was on its way. ssh2_rportfwd_remove
++         * has already sent cancel-tcpip-forward, which the server
++         * handles after the request, so nothing more is needed whatever
++         * the answer was; only the record itself is left to free.
++         */
++        struct ssh_rportfwd **pp = &s->removed_rportfwds;
++        while (*pp && *pp != rpf)
++            pp = &(*pp)->next_removed;
++        assert(*pp == rpf);
++        *pp = rpf->next_removed;
++        free_rportfwd(rpf);
++        return;
++    }
++
+     if (pktin->type == SSH2_MSG_REQUEST_SUCCESS) {
+         ppl_logevent("Remote port forwarding from %s enabled",
+                      rpf->log_description);
+@@ -253,6 +270,8 @@
+     rpf->log_description = dupstr(log_description);
+     rpf->pfr = pfr;
+     rpf->share_ctx = share_ctx;
++    rpf->reply_pending = rpf->removed = false;
++    rpf->next_removed = NULL;
+ 
+     if (add234(s->rportfwds, rpf) != rpf) {
+         free_rportfwd(rpf);
+@@ -270,6 +289,7 @@
+ 
+         ssh2_queue_global_request_handler(
+             s, ssh2_rportfwd_globreq_response, rpf);
++        rpf->reply_pending = true;
+     }
+ 
+     return rpf;
+@@ -300,6 +320,15 @@
+     assert(s->rportfwds);
+     struct ssh_rportfwd *realpf = del234(s->rportfwds, rpf);
+     assert(realpf == rpf);
++    if (rpf->reply_pending) {
++        /* The reply handler still refers to rpf: free it from there. Its
++         * PortFwdRecord is being freed by our caller. */
++        rpf->removed = true;
++        rpf->pfr = NULL;
++        rpf->next_removed = s->removed_rportfwds;
++        s->removed_rportfwds = rpf;
++        return;
++    }
+     free_rportfwd(rpf);
+ }
+ 
+--- a/ssh/connection2.c
++++ b/ssh/connection2.c
+@@ -312,6 +312,17 @@
+             free_rportfwd(rpf);
+         freetree234(s->rportfwds);
+     }
++    while ((rpf = s->removed_rportfwds) != NULL) {
++        s->removed_rportfwds = rpf->next_removed;
++        free_rportfwd(rpf);
++    }
++    /* Replies that will never come now. */
++    while (s->globreq_head) {
++        struct outstanding_global_request *ogr = s->globreq_head;
++        s->globreq_head = ogr->next;
++        sfree(ogr);
++    }
++    s->globreq_tail = NULL;
+     portfwdmgr_free(s->portfwdmgr);
+ 
+     if (s->antispoof_prompt)
+--- a/ssh/connection2.h
++++ b/ssh/connection2.h
+@@ -33,6 +33,8 @@
+     bool got_pty;
+ 
+     tree234 *rportfwds;
++    /* Removed remote forwardings still awaiting a tcpip-forward reply */
++    struct ssh_rportfwd *removed_rportfwds;
+     PortFwdManager *portfwdmgr;
+     bool portfwdmgr_configured;
+ 

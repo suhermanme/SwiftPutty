@@ -27,6 +27,15 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     last-selected-text buffers when the terminal is freed.
   - `0005-ssh-bpp-free-clears-queues.patch`: free packets still queued
     when an SSH connection is torn down.
+  - `0006-portfwd-status-hook.patch`: report the state of each configured
+    port forwarding to the front end.
+  - `0007-rportfwd-cancel-pending-reply.patch`: fix a use after free when
+    a remote port forwarding is removed before the server has answered;
+    free unanswered global requests at teardown.
+  - `0008-portfwd-duplicate-rportfwd-free.patch`: fix a use after free
+    after a duplicate remote port forwarding.
+  - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as
+    upstream's OS X build does, so the Meta-key settings are saved.
   - At compile time (no source change), the session-storage functions of
     `unix/storage.c` are renamed, so that SwiftPutty can supply its own
     session storage.

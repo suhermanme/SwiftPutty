@@ -429,11 +429,35 @@ static void spb_logging_error(LogPolicy *lp, const char *event)
     seat_stderr_pl(&s->seat, PTRLEN_LITERAL("\r\n"));
 }
 
+/* Patch 0006: structured port forwarding status. */
+static void spb_lp_portfwd_status(LogPolicy *lp, const PortFwdStatus *st)
+{
+    spb_session *s = logpolicy_session(lp);
+    if (atomic_load(&s->released) || !s->cb.portfwd_status)
+        return;
+    spb_portfwd_state state;
+    switch (st->kind) {
+      case PFS_LISTENING:        state = SPB_PORTFWD_LISTENING; break;
+      case PFS_LISTEN_FAILED:    state = SPB_PORTFWD_LISTEN_FAILED; break;
+      case PFS_REMOTE_REQUESTED: state = SPB_PORTFWD_REMOTE_REQUESTED; break;
+      case PFS_REMOTE_ENABLED:   state = SPB_PORTFWD_REMOTE_ENABLED; break;
+      case PFS_REMOTE_REFUSED:   state = SPB_PORTFWD_REMOTE_REFUSED; break;
+      case PFS_DUPLICATE:        state = SPB_PORTFWD_DUPLICATE; break;
+      default:                   state = SPB_PORTFWD_CLOSED; break;
+    }
+    spb_portfwd_status status = {
+        .state = state, .key = st->key, .value = st->value,
+        .message = st->message,
+    };
+    s->cb.portfwd_status(s->cb_ctx, &status);
+}
+
 static const LogPolicyVtable spb_logpolicy_vt = {
     .eventlog = spb_eventlog,
     .askappend = spb_askappend,
     .logging_error = spb_logging_error,
     .verbose = null_lp_verbose_yes,
+    .portfwd_status = spb_lp_portfwd_status,
 };
 
 void spb_seat_init(spb_session *s)

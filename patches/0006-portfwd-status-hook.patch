@@ -1,0 +1,217 @@
+SwiftPutty local patch 0006
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   SwiftPutty-specific; could be offered upstream
+
+Structured port forwarding status for front ends.
+
+PuTTY reports the outcome of each port forwarding only as Event Log
+text. A front end that shows per-forwarding state, and that stages
+live edits so that a failed change keeps the previous forwarding
+(docs/ARCHITECTURE.md section 6.4), needs it in structured form.
+
+LogPolicyVtable gains an optional portfwd_status method (NULL-checked
+by lp_portfwd_status, so existing LogPolicy implementations, which use
+designated initialisers, are unaffected). Each PortFwdRecord created
+from CONF_portfwd remembers its configuration key and value, and
+portfwdmgr_report_status() reports, next to the existing Event Log
+messages: listening / listen failed (local and dynamic), request sent /
+enabled / refused / duplicate (remote, SSH-1 and SSH-2), and closed (a
+forwarding removed by reconfiguration). Behaviour is otherwise
+unchanged.
+
+--- a/defs.h
++++ b/defs.h
+@@ -119,6 +119,28 @@
+ typedef struct Ldisc_tag Ldisc;
+ typedef struct LogContext LogContext;
+ typedef struct LogPolicy LogPolicy;
++
++/*
++ * The outcome of setting up or removing one configured port forwarding,
++ * for front ends that show per-forwarding state (LogPolicyVtable
++ * portfwd_status). key and value are the CONF_portfwd entry the
++ * forwarding came from.
++ */
++typedef enum PortFwdStatusKind {
++    PFS_LISTENING,          /* local or dynamic: listening */
++    PFS_LISTEN_FAILED,      /* local or dynamic: could not listen */
++    PFS_REMOTE_REQUESTED,   /* remote: request sent to the server */
++    PFS_REMOTE_ENABLED,     /* remote: the server accepted it */
++    PFS_REMOTE_REFUSED,     /* remote: the server refused it */
++    PFS_DUPLICATE,          /* remote: listening address already in use */
++    PFS_CLOSED,             /* removed by a configuration change */
++} PortFwdStatusKind;
++typedef struct PortFwdStatus {
++    PortFwdStatusKind kind;
++    const char *key, *value;
++    const char *message;    /* error text, or NULL */
++} PortFwdStatus;
++
+ typedef struct LogPolicyVtable LogPolicyVtable;
+ 
+ typedef struct TermLineEditor TermLineEditor;
+--- a/putty.h
++++ b/putty.h
+@@ -2110,6 +2110,12 @@
+      * Ask whether extra verbose log messages are required.
+      */
+     bool (*verbose)(LogPolicy *lp);
++
++    /*
++     * Optional (may be NULL): report the state of a configured port
++     * forwarding, alongside the Event Log text for the same event.
++     */
++    void (*portfwd_status)(LogPolicy *lp, const PortFwdStatus *status);
+ };
+ struct LogPolicy {
+     const LogPolicyVtable *vt;
+@@ -2117,6 +2123,9 @@
+ 
+ static inline void lp_eventlog(LogPolicy *lp, const char *event)
+ { lp->vt->eventlog(lp, event); }
++static inline void lp_portfwd_status(LogPolicy *lp,
++                                     const PortFwdStatus *status)
++{ if (lp->vt->portfwd_status) lp->vt->portfwd_status(lp, status); }
+ static inline int lp_askappend(
+     LogPolicy *lp, Filename *filename,
+     void (*callback)(void *ctx, int result), void *ctx)
+--- a/ssh.h
++++ b/ssh.h
+@@ -388,6 +388,10 @@
+ void portfwdmgr_free(PortFwdManager *mgr);
+ void portfwdmgr_config(PortFwdManager *mgr, Conf *conf);
+ void portfwdmgr_close(PortFwdManager *mgr, PortFwdRecord *pfr);
++/* Report a configured forwarding's state to the LogPolicy (no-op for
++ * forwardings that did not come from CONF_portfwd, or a NULL pfr). */
++void portfwdmgr_report_status(PortFwdManager *mgr, PortFwdRecord *pfr,
++                              PortFwdStatusKind kind, const char *message);
+ void portfwdmgr_close_all(PortFwdManager *mgr);
+ char *portfwdmgr_connect(PortFwdManager *mgr, Channel **chan_ret,
+                          char *hostname, int port, SshChannel *c,
+--- a/ssh/connection1-client.c
++++ b/ssh/connection1-client.c
+@@ -484,9 +484,13 @@
+     if (success) {
+         ppl_logevent("Remote port forwarding from %s enabled",
+                      rpf->log_description);
++        portfwdmgr_report_status(s->portfwdmgr, rpf->pfr,
++                                 PFS_REMOTE_ENABLED, NULL);
+     } else {
+         ppl_logevent("Remote port forwarding from %s refused",
+                      rpf->log_description);
++        portfwdmgr_report_status(s->portfwdmgr, rpf->pfr,
++                                 PFS_REMOTE_REFUSED, NULL);
+ 
+         struct ssh_rportfwd *realpf = del234(s->rportfwds, rpf);
+         assert(realpf == rpf);
+--- a/ssh/connection2-client.c
++++ b/ssh/connection2-client.c
+@@ -217,9 +217,13 @@
+     if (pktin->type == SSH2_MSG_REQUEST_SUCCESS) {
+         ppl_logevent("Remote port forwarding from %s enabled",
+                      rpf->log_description);
++        portfwdmgr_report_status(s->portfwdmgr, rpf->pfr,
++                                 PFS_REMOTE_ENABLED, NULL);
+     } else {
+         ppl_logevent("Remote port forwarding from %s refused",
+                      rpf->log_description);
++        portfwdmgr_report_status(s->portfwdmgr, rpf->pfr,
++                                 PFS_REMOTE_REFUSED, NULL);
+ 
+         struct ssh_rportfwd *realpf = del234(s->rportfwds, rpf);
+         assert(realpf == rpf);
+--- a/ssh/portfwd.c
++++ b/ssh/portfwd.c
+@@ -689,6 +689,7 @@
+     struct ssh_rportfwd *remote;
+     int addressfamily;
+     struct PortListener *local;
++    char *conf_key, *conf_value;   /* the CONF_portfwd entry, if any */
+ };
+ 
+ static int pfr_cmp(void *av, void *bv)
+@@ -731,6 +732,8 @@
+     sfree(pfr->daddr);
+     sfree(pfr->sserv);
+     sfree(pfr->dserv);
++    sfree(pfr->conf_key);
++    sfree(pfr->conf_value);
+     sfree(pfr);
+ }
+ 
+@@ -749,6 +752,18 @@
+     mgr->forwardings = newtree234(pfr_cmp);
+ 
+     return mgr;
++}
++
++void portfwdmgr_report_status(PortFwdManager *mgr, PortFwdRecord *pfr,
++                              PortFwdStatusKind kind, const char *message)
++{
++    if (!pfr || !pfr->conf_key)
++        return;
++    PortFwdStatus status = {
++        .kind = kind, .key = pfr->conf_key, .value = pfr->conf_value,
++        .message = message,
++    };
++    lp_portfwd_status(log_get_policy(mgr->cl->logctx), &status);
+ }
+ 
+ void portfwdmgr_close(PortFwdManager *mgr, PortFwdRecord *pfr)
+@@ -880,6 +895,8 @@
+             pfr->addressfamily = (address_family == '4' ? ADDRTYPE_IPV4 :
+                                   address_family == '6' ? ADDRTYPE_IPV6 :
+                                   ADDRTYPE_UNSPEC);
++            pfr->conf_key = dupstr(key);
++            pfr->conf_value = dupstr(val);
+ 
+             PortFwdRecord *existing = add234(mgr->forwardings, pfr);
+             if (existing != pfr) {
+@@ -930,6 +947,7 @@
+ 
+             logeventf(mgr->cl->logctx, "Cancelling %s", message);
+             sfree(message);
++            portfwdmgr_report_status(mgr, pfr, PFS_CLOSED, NULL);
+ 
+             /* pfr->remote or pfr->local may be NULL if setting up a
+              * forwarding failed. */
+@@ -996,6 +1014,8 @@
+                           pfr->addressfamily == ADDRTYPE_IPV6 ? "IPv6 " : "",
+                           sportdesc, dportdesc,
+                           err ? " failed: " : "", err ? err : "");
++                portfwdmgr_report_status(
++                    mgr, pfr, err ? PFS_LISTEN_FAILED : PFS_LISTENING, err);
+                 if (err)
+                     sfree(err);
+             } else if (pfr->type == 'D') {
+@@ -1009,6 +1029,8 @@
+                           pfr->addressfamily == ADDRTYPE_IPV6 ? "IPv6 " : "",
+                           sportdesc,
+                           err ? " failed: " : "", err ? err : "");
++                portfwdmgr_report_status(
++                    mgr, pfr, err ? PFS_LISTEN_FAILED : PFS_LISTENING, err);
+ 
+                 if (err)
+                     sfree(err);
+@@ -1031,10 +1053,13 @@
+                     logeventf(mgr->cl->logctx,
+                               "Duplicate remote port forwarding to %s:%d",
+                               pfr->daddr, pfr->dport);
++                    portfwdmgr_report_status(mgr, pfr, PFS_DUPLICATE, NULL);
+                     pfr_free(pfr);
+                 } else {
+                     logeventf(mgr->cl->logctx, "Requesting remote port %s"
+                               " forward to %s", sportdesc, dportdesc);
++                    portfwdmgr_report_status(mgr, pfr, PFS_REMOTE_REQUESTED,
++                                             NULL);
+                 }
+             }
+             sfree(sportdesc);
+@@ -1058,6 +1083,7 @@
+     pfr->local = NULL;
+     pfr->remote = NULL;
+     pfr->addressfamily = ADDRTYPE_UNSPEC;
++    pfr->conf_key = pfr->conf_value = NULL;
+ 
+     PortFwdRecord *existing = add234(mgr->forwardings, pfr);
+     if (existing != pfr) {

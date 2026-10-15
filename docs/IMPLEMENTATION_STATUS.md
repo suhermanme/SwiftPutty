@@ -10,7 +10,7 @@
 | **M05** | Saved sessions and PuTTY config UI | **COMPLETE** (2026-10-15) |
 | **M06** | Terminal parity | **COMPLETE** (2026-10-15) |
 | **M07** | Live session reconfiguration framework | **COMPLETE** (2026-10-15) |
-| M08 | SSH tunnels + live tunnel reconfiguration | NOT STARTED |
+| **M08** | SSH tunnels + live tunnel reconfiguration | **COMPLETE** (2026-10-15) |
 | M09 | SSH authentication and connection parity | NOT STARTED |
 | M10 | Event log and session operations | NOT STARTED |
 | M11 | Additional PuTTY backends | NOT STARTED |
@@ -20,6 +20,78 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M08 — SSH tunnels + live tunnel reconfiguration
+
+**Delivered**
+
+- **Upstream bugs H-1 and H-2 reproduced, then fixed** (D-032): under
+  AddressSanitizer, removing a remote forwarding before the server has
+  answered was a use after free in `ssh2_rportfwd_globreq_response`
+  (freed in `ssh2_rportfwd_remove`), and a duplicate remote forwarding
+  left a freed record that the next `portfwdmgr_config` used. Patches
+  `0007` and `0008` fix them; `0007` also frees the queue of unanswered
+  global requests at teardown (an upstream leak). The reproductions stay
+  as regression tests.
+- **Structured forwarding status** (patch `0006`, bridge API v8
+  `portfwd_status`): listening, listen failed (with PuTTY's reason),
+  remote requested / enabled / refused, duplicate, closed, keyed by the
+  exact `PortForwardings` entry.
+- **Tunnels in the configuration dialog**: Connection/SSH (remote command,
+  no shell, compression; mid-session as config.c) and Connection/SSH/
+  Tunnels as PuTTY's (accept-all options, list, Remove filling the fields,
+  Add, Local / Remote / Dynamic, Auto / IPv4 / IPv6, PuTTY's messages),
+  plus a refusal of a second remote forwarding on the same server port.
+  Mid-session each forwarding shows its live state.
+- **Live edits, staged** (ARCHITECTURE §6.4): Remove-then-Add is recorded
+  as an edit. A forwarding moved to another listening address is added
+  before the old one is removed, and the old one stays if the new one
+  fails; one changed on the same address is replaced and put back on
+  failure. The user is told what was kept. Plain adds and removes behave
+  exactly as in PuTTY.
+- **Swift**: `PortForwarding` (PuTTY's saved format, kinds, listening
+  addresses), `PortForwardStatus`, `PortForwardingEdit`;
+  `SessionController.portForwardStatuses`,
+  `applyChangeSettings(_:portForwardingEdits:)`, `lastPortForwardingReport`.
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | OK, 0 warnings |
+| H-1 / H-2 reproduced before the fixes (ASan, `spb_ssh_test`) | Use after free in `ssh2_rportfwd_globreq_response`; then, with 0007 only, in `portfwdmgr_config` after the duplicate branch |
+| C tests (`spb_ssh_test` adds: L / D / R forwardings added live and used end to end, status events, removed live with an established stream kept, R on/off 50 times, listen failure on a taken port, H-1, H-2; shell and transport id checked throughout) | Passed |
+| `leaks --atExit`: all four C test programs | 0 leaks, 0 bytes (each) |
+| C tests under ASan + UBSan / TSan (Debug) | Passed, no reports |
+| `swift test` (94 tests, 18 suites; new: saved format, listening addresses, Tunnels panel rules, edit pairs, staged edits against uppity incl. a move to a taken port keeping the old forwarding, remote status and staged remote move) | 94/94 passed |
+| `swift test --sanitize=address` / `--sanitize=thread` | 94/94 passed, no reports |
+| App Debug build; Release build, universal | Succeeded, 0 warnings; `lipo`: x86_64 arm64 |
+
+**Manual interoperability check** against the LAN OpenSSH 10.2p1 server,
+through the bridge as the app uses it, all on one connection: local
+forwarding to the server's sshd (banner received), dynamic forwarding
+(SOCKS5) to the same, a remote forwarding accepted by OpenSSH and used
+from the server's shell back to a local echo server (`/dev/tcp`), all
+removed live (local port closed), five add/remove races of a remote
+forwarding (the H-1 pattern), shell alive and transport id unchanged.
+
+**Problems found and fixed during M08**
+
+- H-1 and H-2 (above), and the leaked global-request queue.
+- The new status type in `ssh.h` needed to live in `defs.h`: some upstream
+  files include `ssh.h` without `putty.h`.
+
+**Limitations / not done**
+
+- The Tunnels sheet in the running app was build-checked and its pieces
+  tested (model, controller staging, panel layout), not clicked through
+  by hand.
+- Staging is for edits (Remove-then-Add); PuTTY's single-step semantics
+  apply otherwise, including keeping a refused remote forwarding
+  configured. SSH-1 cannot cancel remote forwardings (upstream).
+- Patches 0007 / 0008 are not yet reported upstream (M16/M17 task).
+- X11 forwarding and agent forwarding are M09.
 
 ## M07 — Live session reconfiguration framework
 

@@ -90,9 +90,9 @@ Verified in M01: each slice contains its hardware crypto
 | `0003-network-free-connect-error-message.patch` | `unix/network.c` | **Applied (M02).** The error text of a failed asynchronous `connect()` was never freed (one leak per failed attempt). Found by `leaks --atExit` | Not yet reported; suitable for upstream |
 | `0004-terminal-free-last-selected-text.patch` | `terminal/terminal.c` | **Applied (M03).** `term_free()` did not free the "last selected text" buffers that `clipme()` hands to the Terminal for `CLIP_LOCAL`. Unnoticed upstream because frontends free a Terminal only at process exit. Found by `leaks --atExit` | Not yet reported; suitable for upstream |
 | `0005-ssh-bpp-free-clears-queues.patch` | `ssh/common.c` | **Applied (M04).** `ssh_bpp_free()` did not free packets still queued in the BPP (e.g. while the host key dialog pauses key exchange), so closing such a session leaked them. Found by `leaks --atExit` | Not yet reported; suitable for upstream |
-| `0006-portfwd-status-hook.patch` | `putty.h`, `logging.c`, `ssh/portfwd.c`, `ssh/connection2-client.c` | *Planned (M08).* Optional `LogPolicyVtable.portfwd_status` method plus helper. `PortFwdRecord` remembers its `CONF_portfwd` key/value. Calls at listen success/failure, remote enabled/refused, cancel, duplicate. NULL-checked, so no behaviour change for other frontends | Possibly; SwiftPutty-specific otherwise |
-| `0007-rportfwd-cancel-pending-reply.patch` | `ssh/connection2-client.c`, `ssh.h` | *Planned (M08).* Fix H-1: removing a remote forward while its `tcpip-forward` reply is outstanding is a use-after-free (ARCHITECTURE §5.6) | **Report to upstream** |
-| `0008-portfwd-duplicate-rportfwd-free.patch` | `ssh/portfwd.c` | *Planned (M08).* Fix H-2: `pfr_free` without `del234` in the duplicate-remote branch (ARCHITECTURE §5.6) | **Report to upstream** |
+| `0006-portfwd-status-hook.patch` | `defs.h`, `putty.h`, `ssh.h`, `ssh/portfwd.c`, `ssh/connection1-client.c`, `ssh/connection2-client.c` | **Applied (M08).** Optional `LogPolicyVtable.portfwd_status` method (NULL-checked via `lp_portfwd_status`, so other frontends are unaffected). `PortFwdRecord` remembers its `CONF_portfwd` key/value; `portfwdmgr_report_status()` reports listening / listen failed, remote requested / enabled / refused / duplicate, and closed, next to the existing Event Log messages | SwiftPutty-specific; could be offered |
+| `0007-rportfwd-cancel-pending-reply.patch` | `ssh.h`, `ssh/connection2.h`, `ssh/connection2.c`, `ssh/connection2-client.c` | **Applied (M08).** Fix H-1: removing a remote forward while its `tcpip-forward` reply is outstanding was a use-after-free in `ssh2_rportfwd_globreq_response` (reproduced under ASan, `spb_ssh_test`). Such records are now marked removed and freed by the reply handler. Also frees the queue of outstanding global requests at connection teardown, which leaked | **Not yet reported; should be** (memory safety) |
+| `0008-portfwd-duplicate-rportfwd-free.patch` | `ssh/portfwd.c` | **Applied (M08).** Fix H-2: a duplicate remote forwarding's record was freed but left in the manager's tree; the next `portfwdmgr_config` used it (reproduced under ASan, `spb_ssh_test`). Now removed from the tree first | **Not yet reported; should be** (memory safety) |
 
 Each patch carries a header stating its purpose, the upstream version it
 was made against, and its upstream status. See also `patches/README.md`.
@@ -108,7 +108,10 @@ was made against, and its upstream status. See also `patches/README.md`.
   forward. Fixed long ago, but the same code region was involved.
 - Changes in upstream `main` after 0.85 to forwarding code (checked during
   M00): only `6a1c058a` "Missing consts in the port forwarding code"
-  (cosmetic). H-1 and H-2 are still present in `main`.
+  (cosmetic). H-1 and H-2 are still present in `main`. Both were
+  reproduced under AddressSanitizer in M08 (use after free in
+  `ssh2_rportfwd_globreq_response`, and in `portfwdmgr_config` after the
+  duplicate branch) and are fixed by patches 0007 and 0008.
 
 ## Update procedure (to be validated in M16)
 

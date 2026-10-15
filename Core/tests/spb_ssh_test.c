@@ -4,12 +4,18 @@
  * (accept and store, accept once, cancel, changed key), login prompts in
  * the terminal (user name, password, wrong password), shell input and
  * output, terminal size, exit status, and closing with a prompt pending.
+ * Live reconfiguration (M07) and port forwarding (M08): local, dynamic
+ * and remote forwardings added, used and removed on a live connection,
+ * their status events, and the H-1 / H-2 regressions.
  *
  * Uses only the public PuTTYBridge.h API. Exit status 0 on success.
  */
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +144,10 @@ typedef struct record {
     spb_settings *exported;
     int32_t protocol_info;
     int reconfigured;
+    /* Port forwarding status events (M08), in order */
+    struct { spb_portfwd_state state; char key[64]; char message[256]; }
+        portfwd[256];
+    int n_portfwd;
 } record;
 
 static record rec = {
@@ -208,6 +218,19 @@ static void cb_reconfigured(void *ctx, uint64_t request, const char *error)
     WITH_REC(if (!error) rec.reconfigured++);
 }
 
+static void cb_portfwd(void *ctx, const spb_portfwd_status *st)
+{
+    WITH_REC(if (rec.n_portfwd < 256) {
+                 rec.portfwd[rec.n_portfwd].state = st->state;
+                 snprintf(rec.portfwd[rec.n_portfwd].key,
+                          sizeof(rec.portfwd[0].key), "%s", st->key);
+                 snprintf(rec.portfwd[rec.n_portfwd].message,
+                          sizeof(rec.portfwd[0].message), "%s",
+                          st->message ? st->message : "");
+                 rec.n_portfwd++;
+             });
+}
+
 static const spb_session_callbacks callbacks = {
     .state_changed = cb_state,
     .remote_exit = cb_exit,
@@ -217,6 +240,7 @@ static const spb_session_callbacks callbacks = {
     .event_log = cb_event_log,
     .settings_exported = cb_exported,
     .reconfigured = cb_reconfigured,
+    .portfwd_status = cb_portfwd,
 };
 
 typedef bool (*rec_pred)(void);
@@ -252,6 +276,7 @@ static void reset_record(void)
     rec.exported = NULL;
     rec.event_log[0] = '\0';
     rec.reconfigured = 0;
+    rec.n_portfwd = 0;
     WITH_REC(rec.state = SPB_SESSION_CREATED; rec.detail[0] = 0;
              rec.got_exit = false; rec.released = false; rec.prompts = 0;
              rec.prompts_cancelled = 0);
@@ -548,6 +573,321 @@ static void test_changed_host_key(fixture *f)
     fixture_stop(&impostor);
 }
 
+/* ---------- Port forwarding (M08) ---------- */
+
+/* A loopback echo server: one thread per connection. */
+typedef struct echo_server { int fd, port; pthread_t thread; } echo_server;
+
+static int loopback_listener(int *port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in a = { .sin_family = AF_INET,
+                             .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t len = sizeof(a);
+    if (bind(fd, (struct sockaddr *)&a, len) < 0 || listen(fd, 64) < 0) {
+        perror("listen");
+        exit(2);
+    }
+    getsockname(fd, (struct sockaddr *)&a, &len);
+    *port = ntohs(a.sin_port);
+    return fd;
+}
+
+static int free_port(void)
+{
+    int port, fd = loopback_listener(&port);
+    close(fd);
+    return port;
+}
+
+static void *echo_conn(void *arg)
+{
+    int fd = (int)(intptr_t)arg;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0)
+        if (write(fd, buf, n) != n)
+            break;
+    close(fd);
+    return NULL;
+}
+
+static void *echo_main(void *arg)
+{
+    echo_server *e = arg;
+    int fd;
+    while ((fd = accept(e->fd, NULL, NULL)) >= 0) {
+        pthread_t t;
+        pthread_create(&t, NULL, echo_conn, (void *)(intptr_t)fd);
+        pthread_detach(t);
+    }
+    return NULL;
+}
+
+static void echo_start(echo_server *e)
+{
+    e->fd = loopback_listener(&e->port);
+    pthread_create(&e->thread, NULL, echo_main, e);
+}
+
+static void echo_stop(echo_server *e)
+{
+    shutdown(e->fd, SHUT_RDWR);
+    close(e->fd);
+    pthread_join(e->thread, NULL);
+}
+
+/* Connect to 127.0.0.1:port; -1 if refused. */
+static int connect_port(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct timeval tv = { 5, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port),
+                             .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) < 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static bool read_exactly(int fd, char *buf, size_t n)
+{
+    size_t got = 0;
+    while (got < n) {
+        ssize_t r = read(fd, buf + got, n - got);
+        if (r <= 0)
+            return false;
+        got += r;
+    }
+    return true;
+}
+
+/* Send text over fd and expect it back. */
+static bool echoes(int fd, const char *text)
+{
+    size_t n = strlen(text);
+    char buf[256] = "";
+    return write(fd, text, n) == (ssize_t)n && read_exactly(fd, buf, n) &&
+        !memcmp(buf, text, n);
+}
+
+/* SOCKS5 CONNECT to 127.0.0.1:target through the proxy at port. */
+static int socks5_connect(int port, int target)
+{
+    int fd = connect_port(port);
+    if (fd < 0)
+        return -1;
+    unsigned char hello[] = { 5, 1, 0 }, reply[10];
+    unsigned char req[] = { 5, 1, 0, 1, 127, 0, 0, 1,
+                            (unsigned char)(target >> 8),
+                            (unsigned char)target };
+    if (write(fd, hello, 3) != 3 || !read_exactly(fd, (char *)reply, 2) ||
+        reply[1] != 0 || write(fd, req, sizeof(req)) != sizeof(req) ||
+        !read_exactly(fd, (char *)reply, 10) || reply[1] != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static spb_settings *export_running(void)
+{
+    WITH_REC(spb_settings_free(rec.exported); rec.exported = NULL);
+    spb_session_export_settings(session, 1);
+    CHECK(wait_rec(is_exported, 10));
+    pthread_mutex_lock(&rec.lock);
+    spb_settings *s = rec.exported;
+    rec.exported = NULL;
+    pthread_mutex_unlock(&rec.lock);
+    return s;
+}
+
+/* Reconfigure with PortForwardings = forwards (saved form) and wait for
+ * the answer. */
+static void set_forwards(const char *forwards)
+{
+    spb_settings *s = export_running();
+    spb_settings_set(s, "PortForwardings", forwards);
+    WITH_REC(rec.reconfigured = 0);
+    spb_session_reconfigure(session, s, 2);
+    spb_settings_free(s);
+    CHECK(wait_rec(is_reconfigured, 10));
+}
+
+static const char *pf_key;
+static spb_portfwd_state pf_state;
+static bool has_status(void)
+{
+    for (int i = 0; i < rec.n_portfwd; i++)
+        if (rec.portfwd[i].state == pf_state &&
+            !strcmp(rec.portfwd[i].key, pf_key))
+            return true;
+    return false;
+}
+
+static bool wait_status(const char *key, spb_portfwd_state state)
+{
+    pf_key = key;
+    pf_state = state;
+    return wait_rec(has_status, 20);
+}
+
+static void clear_statuses(void)
+{
+    WITH_REC(rec.n_portfwd = 0);
+}
+
+/* A command round trip: the shell still runs, and every packet that
+ * arrived before its output (e.g. global request replies) was handled. */
+static bool shell_alive(void)
+{
+    static int n;
+    char cmd[64], want[64];
+    snprintf(cmd, sizeof(cmd), "echo alive-$((%d+1))\r", n);
+    snprintf(want, sizeof(want), "\nalive-%d\n", n + 1);
+    n++;
+    type(cmd);
+    return wait_screen(want, 20);
+}
+
+static void test_port_forwarding(fixture *f)
+{
+    echo_server echo;
+    echo_start(&echo);
+
+    open_session(f->port, "tester", false);
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    type("weasel\r");
+    CHECK(wait_rec(is_connected, 20));
+    uint64_t transport = spb_session_transport_id(session);
+
+    int pl = free_port(), pd = free_port(), pr = free_port();
+    char forwards[256], kl[32], kd[32], kr[32];
+    snprintf(kl, sizeof(kl), "L%d", pl);
+    snprintf(kd, sizeof(kd), "L%d", pd);      /* dynamic: L key, value D */
+    snprintf(kr, sizeof(kr), "R%d", pr);
+    snprintf(forwards, sizeof(forwards),
+             "L%d=127.0.0.1:%d,D%d,R%d=127.0.0.1:%d",
+             pl, echo.port, pd, pr, echo.port);
+
+    /* Added live: all three come up, with their status. */
+    set_forwards(forwards);
+    CHECK(wait_status(kl, SPB_PORTFWD_LISTENING));
+    CHECK(wait_status(kd, SPB_PORTFWD_LISTENING));
+    CHECK(wait_status(kr, SPB_PORTFWD_REMOTE_REQUESTED));
+    CHECK(wait_status(kr, SPB_PORTFWD_REMOTE_ENABLED));
+
+    /* Local: through the client to the echo server. */
+    int lfd = connect_port(pl);
+    CHECK(lfd >= 0 && echoes(lfd, "local"));
+    /* Dynamic: SOCKS5 to the echo server. */
+    int dfd = socks5_connect(pd, echo.port);
+    CHECK(dfd >= 0 && echoes(dfd, "dynamic"));
+    if (dfd >= 0)
+        close(dfd);
+    /* Remote: the server listens, the client connects onwards. */
+    int rfd = connect_port(pr);
+    CHECK(rfd >= 0 && echoes(rfd, "remote"));
+    if (rfd >= 0)
+        close(rfd);
+
+    /* Removed live: closed, new connections refused, the established
+     * local stream still works, the shell too, same connection. */
+    clear_statuses();
+    set_forwards("");
+    CHECK(wait_status(kl, SPB_PORTFWD_CLOSED));
+    CHECK(wait_status(kd, SPB_PORTFWD_CLOSED));
+    CHECK(wait_status(kr, SPB_PORTFWD_CLOSED));
+    CHECK(connect_port(pl) < 0);
+    CHECK(connect_port(pd) < 0);
+    CHECK(lfd >= 0 && echoes(lfd, "still"));
+    if (lfd >= 0)
+        close(lfd);
+    CHECK(shell_alive());
+    CHECK(spb_session_transport_id(session) == transport);
+
+    /* Remote forwarding on and off, many times. */
+    snprintf(forwards, sizeof(forwards), "R%d=127.0.0.1:%d", pr, echo.port);
+    for (int i = 0; i < 50; i++) {
+        clear_statuses();
+        set_forwards(forwards);
+        CHECK(wait_status(kr, SPB_PORTFWD_REMOTE_ENABLED));
+        if (i % 10 == 0) {
+            rfd = connect_port(pr);
+            CHECK(rfd >= 0 && echoes(rfd, "again"));
+            if (rfd >= 0)
+                close(rfd);
+        }
+        set_forwards("");
+        CHECK(wait_status(kr, SPB_PORTFWD_CLOSED));
+    }
+    CHECK(shell_alive());
+
+    /* A local port that is taken: listen failed, with PuTTY's reason. */
+    int taken, busy = loopback_listener(&taken);
+    char kt[32], taken_fwd[64];
+    snprintf(kt, sizeof(kt), "L%d", taken);
+    snprintf(taken_fwd, sizeof(taken_fwd), "L%d=127.0.0.1:%d", taken,
+             echo.port);
+    clear_statuses();
+    set_forwards(taken_fwd);
+    CHECK(wait_status(kt, SPB_PORTFWD_LISTEN_FAILED));
+    set_forwards("");
+    close(busy);
+
+    /* H-1: a remote forwarding removed before the server has answered
+     * (both changes run before any reply is read). Without patch 0007
+     * the reply handler then uses the freed record (ASan: use after
+     * free). */
+    for (int i = 0; i < 5; i++) {
+        spb_settings *s = export_running();
+        spb_settings_set(s, "PortForwardings", forwards);
+        spb_session_reconfigure(session, s, 3);
+        spb_settings_set(s, "PortForwardings", "");
+        spb_session_reconfigure(session, s, 4);
+        spb_settings_free(s);
+        CHECK(shell_alive());              /* the replies have been read */
+    }
+    CHECK(shell_alive());
+    rfd = connect_port(pr);                /* and the server let go */
+    CHECK(rfd < 0);
+    if (rfd >= 0)
+        close(rfd);
+
+    /* H-2: two remote forwardings on one server port ("R" and "4R"); one
+     * is a duplicate. Without patch 0008 its freed record stays in the
+     * forwarding manager and the next change uses it (ASan: use after
+     * free). */
+    char both[128];
+    snprintf(both, sizeof(both), "R%d=127.0.0.1:%d,4R%d=127.0.0.1:%d",
+             pr, echo.port, pr, echo.port);
+    clear_statuses();
+    set_forwards(both);
+    pthread_mutex_lock(&rec.lock);
+    bool duplicate = false;
+    for (int i = 0; i < rec.n_portfwd; i++)
+        if (rec.portfwd[i].state == SPB_PORTFWD_DUPLICATE)
+            duplicate = true;
+    pthread_mutex_unlock(&rec.lock);
+    CHECK(duplicate);
+    for (int i = 0; i < 3; i++) {
+        set_forwards(both);                /* the same again */
+        CHECK(shell_alive());
+    }
+    set_forwards("");
+    CHECK(shell_alive());
+    CHECK(spb_session_transport_id(session) == transport);
+
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    echo_stop(&echo);
+}
+
 int main(void)
 {
     char template[] = "/tmp/spb-ssh-test-XXXXXX";
@@ -572,6 +912,7 @@ int main(void)
     test_first_connection(&server);
     test_stored_key_and_wrong_password(&server);
     test_live_reconfigure(&server);
+    test_port_forwarding(&server);
     test_accept_once_and_cancel();
     test_changed_host_key(&server);
 

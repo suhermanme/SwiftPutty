@@ -1,0 +1,33 @@
+SwiftPutty local patch 0008
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (memory safety)
+
+Fix a use after free when two configured remote port forwardings map to
+the same server listening address (docs/ARCHITECTURE.md section 5.6,
+hazard H-2).
+
+In portfwdmgr_config()'s create pass, when ssh_rportfwd_alloc() returns
+NULL because another remote forwarding already uses the same server
+address and port (for example "R8080" alongside "4R8080", which differ
+only in address family), the new PortFwdRecord was freed but left in
+mgr->forwardings. The next portfwdmgr_config() (any reconfiguration) or
+portfwdmgr_free() then walked the freed record. Reproduced under
+AddressSanitizer (Core/tests/spb_ssh_test.c).
+
+Remove it from the tree before freeing it, as the destroy pass does,
+stepping the loop index back so no record is skipped.
+
+--- a/ssh/portfwd.c
++++ b/ssh/portfwd.c
+@@ -1054,6 +1054,11 @@
+                               "Duplicate remote port forwarding to %s:%d",
+                               pfr->daddr, pfr->dport);
+                     portfwdmgr_report_status(mgr, pfr, PFS_DUPLICATE, NULL);
++                    /* Out of the tree first, or the next
++                     * portfwdmgr_config() or portfwdmgr_free() would
++                     * find the freed record there. */
++                    delpos234(mgr->forwardings, i);
++                    i--;           /* so we don't skip one in the list */
+                     pfr_free(pfr);
+                 } else {
+                     logeventf(mgr->cl->logctx, "Requesting remote port %s"

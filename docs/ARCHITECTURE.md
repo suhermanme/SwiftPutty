@@ -387,7 +387,9 @@ opens a `direct-tcpip` channel. Removal is identical to local (listener only).
 
 ### 5.6 Upstream hazards found during M00 (to be fixed by local patches)
 
-Both were found by reading the 0.85 source and **have not yet been reproduced**.
+Both were found by reading the 0.85 source. **Both were reproduced under
+AddressSanitizer in M08 and are fixed by patches 0007 and 0008**; the
+reproductions remain as regression tests (`Core/tests/spb_ssh_test.c`).
 They are still present in upstream `main` as of the M00 check (only const
 changes to `portfwd.c` since 0.85). M08 must reproduce each under ASan before
 and after the patch.
@@ -855,11 +857,17 @@ connection; `spb_debug_check_reconfigure_roundtrip` is the R-3 check over
 every `conf_key_info[]` key. `spb_session_copy_settings` now returns the
 settings as created (thread-safe); the running `Conf` changes.
 
+M08 (API v8, D-032) adds the `portfwd_status` callback (patch 0006:
+listening, listen failed, remote requested / enabled / refused,
+duplicate, closed, each with its `CONF_portfwd` key and value) and
+patches 0007 / 0008 for H-1 / H-2 (§5.6). Staging (§6.4) is implemented
+in `SessionController.applyChangeSettings(_:portForwardingEdits:)`.
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |
 |---|---|---|
-| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | Patches `0007`/`0008`; ASan reproduction tests (M08, M13); report upstream |
+| R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | **Mitigated (M08):** reproduced under ASan, fixed by patches `0007`/`0008`, regression tests in `spb_ssh_test`; still to be reported upstream |
 | R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | Accept for M02–M10; measure; options: patch `name_lookup` to resolve on a helper thread, or per-session helper process (decide by M14) |
 | R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | **Mitigated (M07):** unsaved keys copied from the running Conf generically over `conf_key_info[]`; `spb_debug_check_reconfigure_roundtrip` checks every key, and was shown to fail without the overlay |
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |

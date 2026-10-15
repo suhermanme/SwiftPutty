@@ -565,3 +565,33 @@ thread must never wait for the core thread (D-017).
 connection are not offered, and a change PuTTY handles by re-keying
 (ciphers, compression, rekey limits) re-keys the same connection.
 Tunnel edits, with their staging (§6.4), build on this in M08.
+
+## D-032 — Live port forwarding: PuTTY's manager, structured status, edits staged from PuTTY's own idiom
+
+**Status:** Accepted (M08); implements D-005 and ARCHITECTURE §5–6.5; API v8
+**Context:** PuTTY applies forwarding changes by diffing the whole
+`CONF_portfwd` map (`portfwdmgr_config`), reports outcomes only as Event
+Log text, and has two use-after-free bugs on the paths a live editor
+exercises (H-1, H-2).
+**Decision:**
+- Forwardings change only through `spb_session_reconfigure`; there is no
+  per-tunnel C API. Patch 0006 adds structured status (`portfwd_status`
+  callback), keyed by the exact `CONF_portfwd` entry. Patches 0007 / 0008
+  fix H-1 / H-2; both were first reproduced under AddressSanitizer by the
+  new tests, which now guard them.
+- The Tunnels panel is config.c's (list, Remove, Add, Local / Remote /
+  Dynamic, Auto / IPv4 / IPv6, accept-all options), with each row's live
+  state mid-session. PuTTY's way of editing — Remove fills the fields
+  with the entry, Add puts back the changed one — is recorded as an edit
+  pair; no separate Edit control was needed.
+- Edits are staged by `SessionController` (§6.4): to another listening
+  address, the new forwarding is added first and the old one removed only
+  once the new one is up; to the same address, the old one is replaced
+  and put back if the new one fails. Plain adds and removes apply in one
+  step, as in PuTTY. What was kept is reported to the user.
+- A second remote forwarding on the same server address (e.g. `R8080`
+  with `4R8080`) is refused when added (H-2 defence in depth).
+**Consequences:** A failed edit never leaves the user with neither
+forwarding. Forwarding semantics, including PuTTY's "a refused remote
+forwarding stays configured and is requested again on the next change",
+stay upstream's.

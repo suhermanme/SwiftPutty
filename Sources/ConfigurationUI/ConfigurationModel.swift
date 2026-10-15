@@ -294,6 +294,98 @@ public final class ConfigurationModel: Identifiable {
         }
     }
 
+    // MARK: Tunnels (config.c portfwd_handler, M08)
+
+    /// The forwardings, as PuTTY lists them (Conf order: by key).
+    public var forwardings: [PortForwarding] {
+        settings.portForwardings.sorted { $0.key.utf8.lexicographicallyPrecedes($1.key.utf8) }
+    }
+
+    /// The "Add new forwarded port" fields.
+    public var tunnelSource = ""
+    public var tunnelDestination = ""
+    public var tunnelKind = PortForwarding.Kind.local
+    public var tunnelFamily = PortForwarding.AddressFamily.any
+    /// The selected entry of the forwarded ports list.
+    public var selectedForwarding: PortForwarding?
+
+    /// Edits made with PuTTY's idiom (Remove fills the fields with the
+    /// removed entry; Add then adds the changed one): Change Settings
+    /// stages them so a failure keeps the old forwarding.
+    public private(set) var tunnelEdits: [PortForwardingEdit] = []
+    @ObservationIgnored private var removedForEditing: PortForwarding?
+
+    /// Live state of a forwarding, mid-session (set by the session
+    /// window; reads the session's observable state).
+    @ObservationIgnored public var liveStatus: ((PortForwarding) -> PortForwardStatus?)?
+
+    /// The Add button. Error messages are config.c's, plus a check
+    /// SwiftPutty adds: two remote forwardings on the same server port
+    /// would make PuTTY drop one (hazard H-2).
+    public func addForwarding() {
+        let source = tunnelSource
+        guard !source.isEmpty else {
+            errorMessage = "You need to specify a source port number"
+            return
+        }
+        if tunnelKind != .dynamic {
+            guard !tunnelDestination.isEmpty, Self.hostHasPort(tunnelDestination) else {
+                errorMessage = "You need to specify a destination address\nin the form \"host.name:port\""
+                return
+            }
+        }
+        let new = PortForwarding(kind: tunnelKind, family: tunnelFamily, source: source,
+                                 destination: tunnelDestination)
+        var current = settings.portForwardings
+        guard !current.contains(where: { $0.key == new.key }) else {
+            errorMessage = "Specified forwarding already exists"
+            return
+        }
+        let acceptAll = bool(.remotePortAcceptAll)
+        if let address = new.remoteListenAddress(acceptAll: acceptAll),
+           current.contains(where: { $0.remoteListenAddress(acceptAll: acceptAll) == address }) {
+            errorMessage = "A remote forwarding from that server port already exists"
+            return
+        }
+        current.append(new)
+        settings.portForwardings = current
+        if let old = removedForEditing {
+            tunnelEdits.append(PortForwardingEdit(old: old, new: new))
+            removedForEditing = nil
+        }
+    }
+
+    /// The Remove button: removes the selected entry and puts it in the
+    /// fields "for ease of editing", as config.c does.
+    public func removeForwarding() {
+        guard let selected = selectedForwarding,
+              settings.portForwardings.contains(selected) else {
+            beep()
+            return
+        }
+        tunnelFamily = selected.family
+        tunnelKind = selected.kind
+        tunnelSource = selected.source
+        tunnelDestination = selected.destination
+        settings.portForwardings.removeAll { $0 == selected }
+        selectedForwarding = nil
+        // Removing the result of an edit continues that edit.
+        if let index = tunnelEdits.firstIndex(where: { $0.new == selected }) {
+            removedForEditing = tunnelEdits.remove(at: index).old
+        } else {
+            removedForEditing = selected
+        }
+    }
+
+    /// host_strchr(text, ':') != NULL: a colon outside brackets.
+    static func hostHasPort(_ text: String) -> Bool {
+        var depth = 0
+        for c in text {
+            if c == "[" { depth += 1 } else if c == "]" { depth -= 1 } else if c == ":" && depth == 0 { return true }
+        }
+        return false
+    }
+
     // MARK: Formats of the Terminal and Window panels (M06)
 
     /// "Initial state of numeric keypad" (`numeric_keypad_handler`): one

@@ -102,17 +102,22 @@ struct SessionWindow: View {
                 NSSound.beep()
                 return
             }
-            reconfiguration = ConfigurationModel(changing: running.settings,
-                                                 protocolInfo: running.protocolInfo,
-                                                 store: store, beep: { NSSound.beep() })
+            let model = ConfigurationModel(changing: running.settings,
+                                           protocolInfo: running.protocolInfo,
+                                           store: store, beep: { NSSound.beep() })
+            model.liveStatus = { [controller] in controller.portForwardStatuses[$0] }
+            reconfiguration = model
         }
     }
 
     private func apply(_ settings: PuTTYSettings) {
+        let edits = reconfiguration?.tunnelEdits ?? []
         reconfiguration = nil
         Task {
-            if let error = await controller.applyChangeSettings(settings) {
+            if let error = await controller.applyChangeSettings(settings, portForwardingEdits: edits) {
                 reconfigurationError = error
+            } else if !controller.lastPortForwardingReport.isEmpty {
+                reconfigurationError = controller.lastPortForwardingReport.message
             }
         }
     }

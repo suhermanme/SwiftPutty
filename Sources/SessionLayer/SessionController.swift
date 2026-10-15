@@ -19,6 +19,28 @@ public protocol SessionTerminalDelegate: AnyObject {
                   to new: PuTTYSettings)
 }
 
+/// What happened to the edited forwardings of a Change Settings.
+public struct PortForwardingReport: Sendable, Equatable {
+    /// Edits whose new forwarding did not come up: the old one was kept
+    /// (or put back).
+    public var keptPrevious: [(edit: PortForwardingEdit, status: PortForwardStatus?)]
+
+    public static func == (a: Self, b: Self) -> Bool {
+        a.keptPrevious.map(\.edit) == b.keptPrevious.map(\.edit)
+    }
+
+    public var isEmpty: Bool { keptPrevious.isEmpty }
+
+    /// For the user.
+    public var message: String {
+        keptPrevious.map { item in
+            let reason = item.status?.message.map { ": \($0)" } ?? ""
+            return "Port forwarding \(item.edit.new.displayKey) could not be set up\(reason). "
+                + "Kept \(item.edit.old.displayKey) \(item.edit.old.destination)."
+        }.joined(separator: "\n")
+    }
+}
+
 /// What Change Settings starts from.
 public struct RunningSettings: Sendable, Equatable {
     /// The running settings, with the live window title as the
@@ -48,6 +70,9 @@ public final class SessionController {
     /// Whether a Change Settings is open or being applied (PuTTY allows
     /// one at a time).
     public private(set) var isChangingSettings = false
+    /// The last reported state of each configured forwarding (patch
+    /// 0006); emptied when the connection ends.
+    public private(set) var portForwardStatuses: [PortForwarding: PortForwardStatus] = [:]
 
     public private(set) var state: PuTTYSessionState = .created
     /// Why the session reached its current state, if known (for example
@@ -149,9 +174,71 @@ public final class SessionController {
 
     /// Ends Change Settings by applying `newSettings` to the running
     /// session (Apply). Returns an error message, or nil on success.
+    ///
+    /// Edited forwardings are staged (docs/ARCHITECTURE.md section 6.4):
+    /// one moved to another listening address is added before the old
+    /// one is removed, and the old one stays if the new one fails; one on
+    /// the same address replaces the old one, which is put back if the
+    /// new one fails. Other forwarding changes apply in one step, as in
+    /// PuTTY. ``lastPortForwardingReport`` says what was kept.
     @discardableResult
-    public func applyChangeSettings(_ newSettings: PuTTYSettings) async -> String? {
+    public func applyChangeSettings(_ newSettings: PuTTYSettings,
+                                    portForwardingEdits edits: [PortForwardingEdit] = []) async -> String? {
         defer { isChangingSettings = false }
+        guard session != nil else { return "The session no longer exists" }
+        lastPortForwardingReport = PortForwardingReport(keptPrevious: [])
+        let target = newSettings.portForwardings
+        let acceptAll = newSettings["RemotePortAcceptAll"] == "1"
+        // Only edits still meaningful in the result are staged.
+        let staged = edits.filter { target.contains($0.new) && !target.contains($0.old) }
+
+        // Phase 1: everything, plus old forwardings whose replacement
+        // listens elsewhere (make before break).
+        var phase1 = target
+        for edit in staged where listenID(edit.old, acceptAll) != listenID(edit.new, acceptAll) {
+            phase1.append(edit.old)
+        }
+        var settings1 = newSettings
+        settings1.portForwardings = phase1
+        if let error = await reconfigure(to: settings1) { return error }
+        guard !staged.isEmpty else { return nil }
+
+        // Which new forwardings came up.
+        var failed: [(PortForwardingEdit, PortForwardStatus?)] = []
+        for edit in staged {
+            let status = await waitForSettledStatus(of: edit.new)
+            if status?.state.isUp != true { failed.append((edit, status)) }
+        }
+
+        // Phase 2: the result, with the old forwarding instead of each
+        // new one that failed.
+        var phase2 = target
+        for (edit, _) in failed {
+            phase2.removeAll { $0 == edit.new }
+            phase2.append(edit.old)
+        }
+        lastPortForwardingReport = PortForwardingReport(keptPrevious: failed)
+        if Set(phase2) != Set(phase1) {
+            var settings2 = newSettings
+            settings2.portForwardings = phase2
+            if let error = await reconfigure(to: settings2) { return error }
+        }
+        return nil
+    }
+
+    /// What the last ``applyChangeSettings(_:portForwardingEdits:)`` kept.
+    public private(set) var lastPortForwardingReport = PortForwardingReport(keptPrevious: [])
+
+    /// How long a remote forwarding may take to be answered.
+    public static let remoteForwardingTimeout: Duration = .seconds(15)
+
+    /// Two forwardings with the same ID cannot both exist: the local
+    /// port, or the server's listening address.
+    private func listenID(_ f: PortForwarding, _ acceptAll: Bool) -> String {
+        f.remoteListenAddress(acceptAll: acceptAll).map { "R " + $0 } ?? "L " + f.source
+    }
+
+    private func reconfigure(to newSettings: PuTTYSettings) async -> String? {
         guard let session else { return "The session no longer exists" }
         let request = takeRequest()
         let error = await withCheckedContinuation { continuation in
@@ -165,6 +252,20 @@ public final class SessionController {
             terminalDelegate?.terminal(self, settingsChangedFrom: old, to: settings)
         }
         return error
+    }
+
+    /// The forwarding's status once set up has finished (local ones are
+    /// reported during the change; remote ones when the server answers),
+    /// or nil if the connection ends or the server does not answer.
+    private func waitForSettledStatus(of forwarding: PortForwarding) async -> PortForwardStatus? {
+        let deadline = ContinuousClock.now + Self.remoteForwardingTimeout
+        while ContinuousClock.now < deadline && !state.isFinal {
+            if let status = portForwardStatuses[forwarding], status.state.isSettled {
+                return status
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return portForwardStatuses[forwarding]
     }
 
     /// The session is gone: nobody will answer what is still asked.
@@ -209,6 +310,7 @@ public final class SessionController {
         switch event {
         case .stateChanged(let newState, let detail):
             state = newState
+            if newState.isFinal { portForwardStatuses.removeAll() }
             stateDetail = detail
             let waiters = stateWaiters
             stateWaiters.removeAll()
@@ -246,6 +348,12 @@ public final class SessionController {
                 .resume(returning: RunningSettings(settings: exported, protocolInfo: info))
         case .reconfigured(let request, let error):
             reconfigureWaiters.removeValue(forKey: request)?.resume(returning: error)
+        case .portForwardStatus(let status):
+            if status.state == .closed {
+                portForwardStatuses[status.forwarding] = nil
+            } else {
+                portForwardStatuses[status.forwarding] = status
+            }
         }
     }
 }

@@ -79,6 +79,10 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     /// Answer to ``PuTTYSession/reconfigure(_:request:)``; `error` is nil
     /// on success.
     case reconfigured(request: UInt64, error: String?)
+    /// A configured port forwarding changed state (set up, answered by
+    /// the server, removed). Nothing is reported when the connection
+    /// ends: every forwarding goes with it.
+    case portForwardStatus(PortForwardStatus)
 }
 
 /// A question PuTTY asks in a dialog box: host key confirmation, a
@@ -274,6 +278,10 @@ public final class PuTTYSession: Sendable {
             reconfigured: { ctx, request, error in
                 EventSink.from(ctx).yield(.reconfigured(request: request,
                                                         error: error.map { String(cString: $0) }))
+            },
+            portfwd_status: { ctx, status in
+                guard let status else { return }
+                EventSink.from(ctx).yield(.portForwardStatus(PortForwardStatus(status)))
             })
 
         var error: UnsafeMutablePointer<CChar>?

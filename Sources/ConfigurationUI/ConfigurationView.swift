@@ -9,7 +9,7 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
     case session, logging
     case terminal, keyboard, bell, features
     case window, appearance, behaviour, translation, selection, copy, colours
-    case connection, data
+    case connection, data, ssh, tunnels
 
     public var id: Self { self }
 
@@ -31,13 +31,15 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .colours: "Colours"
         case .connection: "Connection"
         case .data: "Data"
+        case .ssh: "SSH"
+        case .tunnels: "Tunnels"
         }
     }
 
     /// Nesting depth in the tree.
     public var depth: Int {
         switch self {
-        case .copy: 2
+        case .copy, .tunnels: 2
         case .session, .terminal, .window, .connection: 0
         default: 1
         }
@@ -61,6 +63,8 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .colours: "Options controlling use of colours"
         case .connection: "Options controlling the connection"
         case .data: "Data to send to the server"
+        case .ssh: "Options controlling SSH connections"
+        case .tunnels: "Options controlling SSH port forwarding"
         }
     }
 }
@@ -148,7 +152,13 @@ public struct ConfigurationView: View {
     /// Connection/Data only matters to a new connection (config.c hides
     /// it mid-session).
     private func isShown(_ category: ConfigurationCategory) -> Bool {
-        !(model.isMidSession && category == .data)
+        guard model.isMidSession else { return true }
+        switch category {
+        case .data: return false
+        // DISPLAY_RECONFIGURABLE_PROTOCOL: SSH panels for SSH sessions.
+        case .ssh, .tunnels: return model.connectionType == "ssh"
+        default: return true
+        }
     }
 
     @ViewBuilder
@@ -169,6 +179,8 @@ public struct ConfigurationView: View {
         case .colours: ColoursPanel(model: model)
         case .connection: ConnectionPanel(model: model)
         case .data: DataPanel(model: model)
+        case .ssh: SSHPanel(model: model)
+        case .tunnels: TunnelsPanel(model: model)
         }
     }
 }
