@@ -207,6 +207,23 @@ static void test_reconfigure_roundtrip(void)
     CHECK(spb_debug_live_settings() == 0);
 }
 
+/* M13: upstream's GSSAPI loader finds macOS's libraries (patch 0021),
+ * each with every function it binds: GSS.framework and the MIT
+ * interface, which every macOS has. */
+static void test_gssapi_libraries(void)
+{
+    size_t count = 0;
+    char **names = spb_debug_gssapi_libraries(&count);
+    bool framework = false, mit = false;
+    for (size_t i = 0; i < count; i++) {
+        framework |= !strcmp(names[i], "Using GSSAPI from GSS.framework");
+        mit |= !strcmp(names[i], "Using GSSAPI from libgssapi_krb5.dylib");
+    }
+    CHECK(framework);
+    CHECK(mit);
+    spb_strings_free(names, count);
+}
+
 static void test_session_lifecycle(void)
 {
     spb_settings *s = spb_settings_new_defaults();
@@ -293,6 +310,7 @@ int main(void)
     test_normalise();
     test_charsets();
     test_reconfigure_roundtrip();
+    test_gssapi_libraries();
     test_session_lifecycle();
     CHECK(spb_debug_live_settings() == 0);
     test_shutdown();

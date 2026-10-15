@@ -870,6 +870,10 @@ M12 (API v10–v11) adds the saved-session lookup for PuTTY's own
 canonicalisation, `spb_session_set_system_colours`, and the
 `clipboard_write_styled` callback for Copy as RTF (D-039).
 
+M13 (API v12) adds `spb_debug_gssapi_libraries` (D-043). The core no
+longer installs a SIGCHLD handler: local commands are reaped per pid by
+`spb_subprocess.c` (D-041).
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |
@@ -880,5 +884,5 @@ canonicalisation, `spb_session_set_system_colours`, and the
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |
 | R-5 | `TermWin` drawing on core thread vs AppKit on main | Frame snapshot design (§8); benchmark in M03/M14 |
 | R-6 | App Sandbox vs. listeners, serial, arbitrary key files, `SSH_AUTH_SOCK` | Evaluate in M15; developer builds unsandboxed |
-| R-7 | `pfl_closing` frees a listener that a `PortFwdRecord` still points to (if a listening socket ever reports closing) | Audit in M13 |
+| R-7 | `pfl_closing` frees a listener that a `PortFwdRecord` still points to (if a listening socket ever reports closing) | **Closed (M13): unreachable on Unix.** `uxsel_tell` selects a listener for reading only (no exception events); a failed `accept()` is ignored; `pending_error`, the only deferred `plug_closing`, is set only by a failed send, and listeners never send. No patch, to stay close to upstream; re-check if `unix/network.c` changes (M16) |
 | R-8 | arm64 slice cannot be executed on the x86_64 development host | **Mitigated (M03):** CI (`.github/workflows/ci.yml`) runs the full `scripts/test-all.sh --clean` on Apple Silicon (`macos-26`) and Intel (`macos-26-intel`) runners for every push to `main` and every pull request |

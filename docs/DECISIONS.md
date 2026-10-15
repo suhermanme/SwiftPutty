@@ -787,3 +787,131 @@ the same rule.
 `resizeActions`, `copyAsRTF`). Windows writes its RTF by hand; macOS
 generates it from an attributed string, so the exact RTF text differs
 while the styling is the same.
+
+## D-040 — The proxy password is kept in the keychain, not the sessions file
+
+**Status:** Accepted (M13)
+**Context:** PuTTY saves `ProxyPassword` with the rest of the session, in
+plain text (the registry on Windows, `~/.putty/sessions` on Unix).
+SwiftPutty's sessions file is mode 0600 (D-027), but it is still a plain
+file that backups, sync tools and support requests copy.
+**Options considered:** (a) Keep PuTTY's behaviour. Rejected by the M13
+review. (b) Never save it; upstream's proxies ask for a missing password
+(SOCKS 5, HTTP after a 407, Telnet and local commands). Rejected: a
+working saved setting would silently stop working. (c) The keychain.
+**Decision:** (c). `SavedSessionStore` takes a `SecretStore`; the app
+passes `KeychainSecretStore.proxyPasswords` (generic passwords, service
+`org.swiftputty.proxy-password`, account = session name). Save writes
+the keychain first and the file second, with `ProxyPassword` empty, so a
+keychain failure (reported, `SavedSessionStoreError.secret`) leaves the
+old session intact. Load fills the password back in; a password still
+in the file is moved to the keychain and the file rewritten. Delete
+removes the item after the file. The JSON format is unchanged (version
+1): an empty value was always valid.
+**Consequences:** Sessions files carry no secrets, so they can be copied
+freely. Copying one to another Mac does not carry the proxy password.
+Developer builds are ad-hoc signed, so after a rebuild macOS may ask once
+whether the new binary may read the item ("Always Allow" answers it); a
+Developer ID signature (M15) keeps the access across updates. Everything
+else PuTTY saves in a session (e.g. `ProxyUsername`) stays in the file.
+
+## D-041 — Local commands: reviewed, spawned without fork, reaped without SIGCHLD
+
+**Status:** Accepted (M13)
+**Context:** Three settings run a local command through `/bin/sh -c`:
+the local proxy command (`ProxyTelnetCommand` with proxy type 5), the
+authentication plugin (`AuthPlugin`) and the pre-connect command
+(`PreConnectCommand`, not offered until this review). They run only
+what the user typed into their own sessions, as in PuTTY, so running a
+command is not itself the risk. The review of how upstream runs them
+(`unix/local-proxy.c`, `unix/utils/subprocess_waiter.c`,
+`proxy/newmain.c`) found:
+1. `fork()` in a multithreaded process, and the command inherited every
+   descriptor not marked close-on-exec (another session's socket).
+2. Local proxy commands and authentication plugins were never waited
+   for: one zombie per use, for the life of the app.
+3. The pre-connect command's waiter installs a process-wide SIGCHLD
+   handler that reaps with `waitpid(-1)`: in an app it takes the exit
+   status of every other child (Foundation `Process`, `popen` in
+   printing) and interrupts system calls on other threads.
+4. `new_main_connection()` blanked the proxy credentials in the session's
+   Conf instead of its temporary copy: `%pass` in a pre-connect command
+   expanded to the proxy password (also into the Event Log), and the
+   session's proxy lost its credentials.
+**Decision:** Patch 0014 fixes 4. Patch 0015 starts every local command
+with `posix_spawn` (`POSIX_SPAWN_CLOEXEC_DEFAULT`: only the three pipes
+survive; signal dispositions and mask reset) and gives every command a
+waiter. `unix/utils/subprocess_waiter.c` is not linked;
+`Core/src/spb_subprocess.c` implements the same API with one detached
+thread per command that waits for that pid alone and hands the exit to
+the core thread; a waiter freed before the exit still reaps. The
+pre-connect command is offered on the Connection panel, as on Windows.
+**Consequences:** No signal handler is installed by the core and no
+child of the app is reaped but SwiftPutty's own. `spb_backends_test`
+checks each point (a non-close-on-exec descriptor is not visible to the
+command, pid gone after exit, `%pass` refused with the proxy still
+authenticating); it fails without patches 0014/0015. A thread per
+running command is cheap at the numbers involved (one per session at
+most for each kind).
+
+## D-042 — Fuzzing with libFuzzer-style harnesses and a built-in driver
+
+**Status:** Accepted (M13)
+**Context:** M13 adds fuzzing for what reaches SwiftPutty from outside:
+a server's terminal output, and text the user pastes or a sessions file
+holds (host keys, CA keys and "valid hosts" expressions, every saved
+keyword). Apple's clang has no libFuzzer runtime; an LLVM toolchain
+would be a new, large dependency on every developer Mac and CI runner.
+**Decision:** Harnesses use libFuzzer's interface
+(`LLVMFuzzerTestOneInput`, `LLVMFuzzerInitialize`) and live in
+`Core/tests/fuzz/`. By default they link with `spb_fuzz_driver.c`, which
+runs the seed corpus and then a fixed number of mutated inputs from a
+seeded generator (bit flips, byte edits, range copies and deletions,
+dictionary tokens, splices), and saves the input being run if the
+process dies. `-DSPB_LIBFUZZER=ON` links them with `-fsanitize=fuzzer`
+instead, for coverage-guided runs with an LLVM clang.
+- `spb_fuzz_terminal` drives one Raw session through the bridge: each
+  input is the server's output, followed by a reset and a marker that
+  proves it was processed; then the frame is read and the screen copied
+  as RTF.
+- `spb_fuzz_parsers` covers manual host keys, CA keys, validity
+  expressions and settings records over the defaults plus the legacy
+  keywords `settings.c` still reads, normalised and turned into a
+  session (with a core barrier, so a failure is blamed on its input).
+- ctest runs a short deterministic pass of each (400 and 4,000 inputs)
+  in the plain, ASan+UBSan and TSan builds, so CI fuzzes on every push.
+  Inputs that found bugs stay in the corpus as regression seeds.
+**Consequences:** The pass is not coverage-guided, so it finds shallow
+bugs best; it found five upstream ones in its first runs (patches
+0016–0019; 0017 reachable from a malicious server). Longer runs:
+`SPB_FUZZ_RUNS=<n>` or `-runs=`/`-seed=` by hand. A coverage-guided
+campaign with libFuzzer remains worthwhile before release (M17).
+
+## D-043 — GSSAPI on macOS: the system's libraries, under PuTTY's keywords
+
+**Status:** Accepted (M13)
+**Context:** Upstream's Unix loader (`unix/gss.c`) dlopens
+`libgssapi.so.2`, `libgssapi_krb5.so.2` and `libgss.so.1`; macOS has
+none of them, so GSSAPI key exchange and authentication silently did
+nothing (M09 left the rows PARTIAL). macOS ships `GSS.framework`
+(Heimdal-based) and `libgssapi_krb5.dylib` (an MIT-compatible interface
+to it), and both export every function PuTTY binds.
+**Options considered:** (a) NOT APPLICABLE. Rejected: the platform has
+GSSAPI, and enterprise users rely on Kerberos SSH. (b) Ask users to type
+a library path. Rejected: works, but the default would stay broken. (c)
+Patch the loader's names on macOS.
+**Decision:** (c), patch 0021: on `__APPLE__` the three slots load
+`GSS.framework`, `libgssapi_krb5.dylib` and `libgss.dylib` (if
+installed), and the list shows those names. The settings keywords
+(`libgssapi`, `libgssapi_krb5`, `libgss`, `custom`) do not change, so a
+saved session means the same thing on every platform.
+`spb_debug_gssapi_libraries` (API v12) reports what the loader opened.
+**Consequences:** The bridge test checks both system libraries load with
+every function bound, and the SSH test that a login with GSSAPI on (the
+default) is not delayed (0.06 s against 0.03 s off, on a Mac with a
+local KDC). A GSSAPI login itself is not tested: it needs a Kerberos
+realm and a server keytab, which a test cannot set up without root.
+On a Mac holding a Kerberos credential (such as its local KDC's), Apple's
+Heimdal leaks a few principals inside `krb5_get_credentials` when the
+key exchange tries it; the `leaks` pass excludes allocations under that
+function and still requires every leak found to be one of them.

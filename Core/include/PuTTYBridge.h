@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 11
+#define SPB_API_VERSION 12
 
 /* ---------- Library information ---------- */
 
@@ -771,6 +771,12 @@ bool spb_debug_check_reconfigure_roundtrip(size_t *keys_checked,
 
 /* Number of spb_settings objects allocated and not yet freed. */
 size_t spb_debug_live_settings(void);
+
+/* The GSSAPI libraries upstream's loader (unix/gss.c) opens with every
+ * function it needs, as the Event Log names them ("Using GSSAPI from
+ * ..."), in its order (API v12). Waits for the core thread. Free with
+ * spb_strings_free. */
+char **spb_debug_gssapi_libraries(size_t *count);
 
 #ifdef __cplusplus
 }

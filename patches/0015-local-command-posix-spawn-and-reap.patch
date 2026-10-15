@@ -1,0 +1,113 @@
+SwiftPutty local patch 0015
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+Local commands (proxy command, pre-connect command, authentication
+plugin): start them with posix_spawn, give them only their three pipes,
+and always wait for them.
+
+start_subprocess_fd_socket() forked and exec'd /bin/sh. In a
+multithreaded process, fork is safe only up to exec, and the command
+inherited every descriptor not marked close-on-exec, e.g. another
+connection's socket. It also kept a SubprocessWaiter only when the
+caller asked for one, so local proxy commands and authentication plugins
+were never reaped and stayed zombies for the life of the process.
+
+Now posix_spawn starts the command with stdin, stdout and stderr on the
+pipes, every other descriptor closed where the platform supports it
+(POSIX_SPAWN_CLOEXEC_DEFAULT, macOS), and signal dispositions and mask
+reset (an ignored SIGPIPE is not inherited). Every command gets a
+waiter; callers that do not want one have it freed at once, which still
+reaps the process. Found by code review for SwiftPutty M13.
+
+--- a/unix/local-proxy.c
++++ b/unix/local-proxy.c
+@@ -8,7 +8,11 @@
+ #include <errno.h>
+ #include <unistd.h>
+ #include <fcntl.h>
++#include <signal.h>
++#include <spawn.h>
+ 
++extern char **environ;
++
+ #include "tree234.h"
+ #include "putty.h"
+ #include "network.h"
+@@ -31,27 +35,59 @@
+     cloexec(from_cmd_pipe[0]);
+     cloexec(cmd_err_pipe[0]);
+ 
+-    int pid = fork();
+-    if (pid == 0) {
+-        close(0);
+-        close(1);
+-        dup2(to_cmd_pipe[0], 0);
+-        dup2(from_cmd_pipe[1], 1);
+-        close(to_cmd_pipe[0]);
+-        close(from_cmd_pipe[1]);
+-        dup2(cmd_err_pipe[1], 2);
+-        noncloexec(0);
+-        noncloexec(1);
+-        execl("/bin/sh", "sh", "-c", cmd, (void *)NULL);
+-        _exit(255);
+-    }
++    /*
++     * posix_spawn rather than fork, so that this is safe in a
++     * multithreaded process. The command gets only the three pipe
++     * ends as stdin, stdout and stderr: where the platform can (macOS
++     * POSIX_SPAWN_CLOEXEC_DEFAULT) every other descriptor is closed,
++     * so it never inherits another connection's socket. Signal
++     * dispositions and mask are reset, so an ignored SIGPIPE in this
++     * process is not ignored in the command.
++     */
++    posix_spawn_file_actions_t actions;
++    posix_spawnattr_t attr;
++    posix_spawn_file_actions_init(&actions);
++    posix_spawnattr_init(&attr);
++    posix_spawn_file_actions_adddup2(&actions, to_cmd_pipe[0], 0);
++    posix_spawn_file_actions_adddup2(&actions, from_cmd_pipe[1], 1);
++    posix_spawn_file_actions_adddup2(&actions, cmd_err_pipe[1], 2);
++    short flags = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
++#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
++    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
++#endif
++    posix_spawnattr_setflags(&attr, flags);
++    sigset_t sigs;
++    sigemptyset(&sigs);
++    posix_spawnattr_setsigmask(&attr, &sigs);
++    sigaddset(&sigs, SIGPIPE);
++    sigaddset(&sigs, SIGCHLD);
++    sigaddset(&sigs, SIGINT);
++    sigaddset(&sigs, SIGQUIT);
++    sigaddset(&sigs, SIGHUP);
++    posix_spawnattr_setsigdefault(&attr, &sigs);
+ 
+-    if (pid < 0) {
+-        return dupprintf("fork: %s", strerror(errno));
++    pid_t pid;
++    char *const argv[] = { "sh", "-c", (char *)cmd, NULL };
++    int err = posix_spawn(&pid, "/bin/sh", &actions, &attr, argv, environ);
++    posix_spawn_file_actions_destroy(&actions);
++    posix_spawnattr_destroy(&attr);
++
++    if (err != 0) {
++        close(to_cmd_pipe[0]); close(to_cmd_pipe[1]);
++        close(from_cmd_pipe[0]); close(from_cmd_pipe[1]);
++        close(cmd_err_pipe[0]); close(cmd_err_pipe[1]);
++        return dupprintf("posix_spawn: %s", strerror(err));
+     }
+ 
++    /*
++     * Every command is waited for, so that none is left a zombie;
++     * only callers that want to hear about its exit keep the waiter.
++     */
++    SubprocessWaiter *w = subproc_waiter_from_pid(pid);
+     if (waiter)
+-        *waiter = subproc_waiter_from_pid(pid);
++        *waiter = w;
++    else
++        subproc_waiter_free(w);
+ 
+     close(to_cmd_pipe[0]);
+     close(from_cmd_pipe[1]);

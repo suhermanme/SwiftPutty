@@ -1,0 +1,1 @@
+*.example.com && port:22 || (host.example.org && !port:1-1023)

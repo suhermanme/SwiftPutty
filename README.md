@@ -21,9 +21,10 @@ and PuTTY core integration), **M02** (session executor and event loop),
 parity), **M07** (live Change Settings), **M08** (SSH tunnels, changed
 live), **M09** (SSH authentication and the SSH panels), **M10** (Event
 Log and session operations), **M11** (Telnet, Rlogin, SUPDUP and serial
-lines) and **M12** (configuration parity: proxies, connection sharing, host
-keys and CAs, agent forwarding, fonts, system colours, Copy as RTF) are
-complete. The app starts
+lines), **M12** (configuration parity: proxies, connection sharing, host
+keys and CAs, agent forwarding, fonts, system colours, Copy as RTF) and
+**M13** (security and reliability: proxy password in the keychain, local
+commands hardened, fuzzing, GSSAPI on macOS, upstream fixes) are complete. The app starts
 with PuTTY's configuration dialog (Session, Logging, Terminal with
 Keyboard / Bell / Features, Window with Appearance / Behaviour /
 Translation / Selection / Colours / Fonts, Connection with Data and Proxy, the SSH panels,

@@ -64,7 +64,7 @@ configure_and_build() {
         || { cat "$dir.configure.log" >&2; return 1; }
     cmake --build "$dir" --target swiftputty-core spb_bridge_test spb_session_test \
         spb_terminal_test spb_ssh_test spb_ssh_fixture uppity \
-        spb_backends_test spb_link_closure_test
+        spb_backends_test spb_link_closure_test spb_fuzz_terminal spb_fuzz_parsers
 }
 
 LIBS=()
@@ -92,9 +92,16 @@ if [[ $RUN_TESTS == 1 ]]; then
     for test in spb_bridge_test spb_session_test spb_terminal_test \
                 spb_ssh_test spb_backends_test; do
         section "$test under leaks --atExit ($HOST_ARCH)"
-        leaks --atExit -- "$BUILD/core-$HOST_ARCH/$test" \
-            | grep -E "^Process [0-9]+: [0-9]+ leaks" \
-            | tee /dev/stderr | grep -q ": 0 leaks"
+        # Apple's Heimdal leaks inside krb5_get_credentials when GSSAPI
+        # key exchange tries a Kerberos credential the Mac holds (e.g.
+        # its local KDC's); not ours, so excluded (D-043). leaks still
+        # counts excluded blocks in its total: every leak must be one.
+        out="$(MallocStackLogging=1 leaks --atExit --exclude krb5_get_credentials \
+               -- "$BUILD/core-$HOST_ARCH/$test" 2>/dev/null)" || true
+        total="$(sed -nE 's/^Process [0-9]+: ([0-9]+) leaks.*/\1/p' <<<"$out")"
+        excluded="$(sed -nE 's/^([0-9]+) leaks? excluded.*/\1/p' <<<"$out")"
+        echo "  $test: ${total:-?} leaks, ${excluded:-0} excluded (Heimdal)" >&2
+        [[ -n "$total" && "$total" -eq "${excluded:-0}" ]]
     done
 fi
 

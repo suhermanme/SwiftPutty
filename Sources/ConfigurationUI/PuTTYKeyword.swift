@@ -110,6 +110,7 @@ public enum PuTTYKeyword: String, CaseIterable, Sendable {
     case pingInterval = "PingInterval"
     case pingIntervalSecs = "PingIntervalSecs"
     case portNumber = "PortNumber"
+    case preConnectCommand = "PreConnectCommand"
     case preferKnownHostKeys = "PreferKnownHostKeys"
     case printer = "Printer"
     case protocolName = "Protocol"

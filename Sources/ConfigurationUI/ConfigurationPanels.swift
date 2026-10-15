@@ -529,6 +529,12 @@ struct ConnectionPanel: View {
                     TextSetting(model: model, label: "Logical name of remote host (e.g. for SSH key lookup):",
                                 keyword: .logHost)
                 }
+                // Runs through upstream's proxy/newmain.c with the M13
+                // hardening (patches 0014, 0015; D-041).
+                SettingsGroup(title: "Command to run at connection event") {
+                    TextSetting(model: model, label: "Command to run before connection",
+                                keyword: .preConnectCommand)
+                }
             }
         }
     }

@@ -9,6 +9,8 @@ public enum SavedSessionStoreError: Error, Equatable, LocalizedError {
     case unreadable(path: String, message: String)
     /// Written by a newer SwiftPutty; it is never overwritten.
     case newerFormat(path: String, version: Int)
+    /// A secret could not be saved in, or removed from, the keychain.
+    case secret(message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +22,8 @@ public enum SavedSessionStoreError: Error, Equatable, LocalizedError {
         case .newerFormat(let path, let version):
             "The saved sessions in \"\(path)\" were written by a newer version "
                 + "of SwiftPutty (format \(version)). SwiftPutty will not change the file."
+        case .secret(let message):
+            "Unable to save the proxy password in the keychain: \(message)"
         }
     }
 }
@@ -36,8 +40,13 @@ public enum SavedSessionStoreError: Error, Equatable, LocalizedError {
 ///
 /// Everything is in one JSON file, read afresh by every call (as PuTTY
 /// reads its storage), replaced atomically on every change, and readable
-/// by the user only (sessions can hold e.g. proxy passwords). A file this
-/// version cannot read is reported and never overwritten.
+/// by the user only. A file this version cannot read is reported and never
+/// overwritten.
+///
+/// Unlike PuTTY, the proxy password is never written to the file (D-040):
+/// it is kept in `secrets` (the keychain, in the app) under the session's
+/// name, and filled in again on load. A password found in the file, from
+/// before, is moved to `secrets` when its session is loaded.
 public struct SavedSessionStore: Sendable {
     public static let defaultSettingsName = "Default Settings"
 
@@ -46,13 +55,18 @@ public struct SavedSessionStore: Sendable {
     static let formatIdentifier = "org.swiftputty.saved-sessions"
 
     public let fileURL: URL
+    public let secrets: any SecretStore
+
+    /// The keywords kept in `secrets` instead of the file.
+    static let secretKeyword = "ProxyPassword"
 
     /// Posted after this process saves or deletes a session (object: the
     /// store's file URL), so that menus listing the sessions can update.
     public static let didChangeNotification = Notification.Name("SavedSessionStoreDidChange")
 
-    public init(fileURL: URL) {
+    public init(fileURL: URL, secrets: any SecretStore) {
         self.fileURL = fileURL
+        self.secrets = secrets
     }
 
     /// `~/Library/Application Support/SwiftPutty/Saved Sessions.json`.
@@ -75,8 +89,24 @@ public struct SavedSessionStore: Sendable {
     /// PuTTY's `load_settings`: the session's settings, normalised;
     /// PuTTY's built-in defaults if there is no such session.
     public func load(_ name: String) throws -> (settings: PuTTYSettings, exists: Bool) {
-        let stored = try readDocument().sessions[Self.storedName(name)]
-        return ((stored ?? PuTTYSettings()).normalised(), stored != nil)
+        let name = Self.storedName(name)
+        var document = try readDocument()
+        guard var stored = document.sessions[name] else {
+            return (PuTTYSettings().normalised(), false)
+        }
+        if let password = stored[Self.secretKeyword], !password.isEmpty {
+            // Saved in the file before D-040: move it to the keychain. If
+            // either step fails, the session still loads, and the move is
+            // tried again next time.
+            if (try? secrets.setSecret(password, for: name)) != nil {
+                document.sessions[name]?[Self.secretKeyword] = ""
+                try? writeDocument(document)
+            }
+            stored[Self.secretKeyword] = password
+        } else {
+            stored[Self.secretKeyword] = secrets.secret(for: name) ?? ""
+        }
+        return (stored.normalised(), true)
     }
 
     /// PuTTY's `do_defaults`: what a new configuration starts from.
@@ -88,8 +118,24 @@ public struct SavedSessionStore: Sendable {
     /// (normalised: every keyword present). An empty name saves
     /// "Default Settings".
     public func save(_ settings: PuTTYSettings, as name: String) throws {
+        let name = Self.storedName(name)
         var document = try readDocument()
-        document.sessions[Self.storedName(name)] = settings.normalised()
+        var stored = settings.normalised()
+        // The keychain first: if it fails, the file still has the old
+        // session rather than one that lost its password.
+        let password = stored[Self.secretKeyword] ?? ""
+        do {
+            if password.isEmpty {
+                try secrets.removeSecret(for: name)
+            } else {
+                try secrets.setSecret(password, for: name)
+            }
+        } catch {
+            throw SavedSessionStoreError.secret(message: (error as? SecretStoreError)?.message
+                                                ?? error.localizedDescription)
+        }
+        stored[Self.secretKeyword] = ""
+        document.sessions[name] = stored
         try writeDocument(document)
         postChange()
     }
@@ -97,9 +143,13 @@ public struct SavedSessionStore: Sendable {
     /// PuTTY's `del_settings`. Deleting a session that does not exist
     /// does nothing.
     public func delete(_ name: String) throws {
+        let name = Self.storedName(name)
         var document = try readDocument()
-        guard document.sessions.removeValue(forKey: Self.storedName(name)) != nil else { return }
+        guard document.sessions.removeValue(forKey: name) != nil else { return }
         try writeDocument(document)
+        // After the file: a password left behind is harmless (a session
+        // saved later under the name replaces it), a lost session is not.
+        try? secrets.removeSecret(for: name)
         postChange()
     }
 

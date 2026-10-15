@@ -1,0 +1,39 @@
+SwiftPutty local patch 0020
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream (undefined
+          behaviour)
+
+Terminal: a copied combining character takes its base cell's
+attributes and colour.
+
+add_cc() keeps combining characters in spare cells at the end of the
+line and sets only their chr and cc_next. clipme() read attr and
+truecolour from those cells for each combining character it copied,
+so the clipboard's attribute and colour arrays (used by Windows' RTF
+copy, and SwiftPutty's) held uninitialised values: undefined behaviour
+for the truecolour flags (bools). Found by UndefinedBehaviorSanitizer on
+Core/tests/fuzz/fuzz_terminal.c ("load of value 190, which is not a
+valid value for type 'bool'"). Applies after patches 0004 and 0019.
+
+--- a/terminal/terminal.c
++++ b/terminal/terminal.c
+@@ -6705,10 +6705,17 @@
+                 continue;
+             }
+ 
++            /*
++             * A combining character takes the attributes and colour of
++             * the cell it combines with: add_cc() sets only the chr and
++             * cc_next of the spare cells it keeps them in, so their own
++             * attr and truecolour were never written.
++             */
++            attr = ldata->chars[x].attr;
++            tc = ldata->chars[x].truecolour;
++
+             while (1) {
+                 int uc = ldata->chars[x].chr;
+-                attr = ldata->chars[x].attr;
+-                tc = ldata->chars[x].truecolour;
+ 
+                 switch (uc & CSET_MASK) {
+                   case CSET_LINEDRW:

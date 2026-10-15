@@ -20,7 +20,7 @@ final class AppModel {
     let sessionStore: SavedSessionStore = {
         let url = (try? SavedSessionStore.defaultFileURL())
             ?? URL.homeDirectory.appending(path: "Library/Application Support/SwiftPutty/Saved Sessions.json")
-        return SavedSessionStore(fileURL: url)
+        return SavedSessionStore(fileURL: url, secrets: KeychainSecretStore.proxyPasswords)
     }()
 
     /// The saved session names for the Saved Sessions menu, without

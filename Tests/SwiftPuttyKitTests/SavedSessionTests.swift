@@ -7,12 +7,14 @@ import Testing
 struct TemporaryStore {
     let directory: URL
     let store: SavedSessionStore
+    let secrets = InMemorySecretStore()
 
     init() {
         directory = FileManager.default.temporaryDirectory
             .appending(path: "SwiftPuttyStore-\(UUID().uuidString)", directoryHint: .isDirectory)
             .appending(path: "SwiftPutty", directoryHint: .isDirectory)
-        store = SavedSessionStore(fileURL: directory.appending(path: "Saved Sessions.json"))
+        store = SavedSessionStore(fileURL: directory.appending(path: "Saved Sessions.json"),
+                                  secrets: secrets)
     }
 
     var fileURL: URL { store.fileURL }
@@ -110,6 +112,154 @@ struct SavedSessionTests {
         try t.store.delete("never saved")
         #expect(try t.store.sessionNames() == ["Default Settings", "two"])
         #expect(try !t.store.load("one").exists)
+    }
+
+    // MARK: Proxy password (D-040)
+
+    @Test func theProxyPasswordIsKeptOutOfTheFile() throws {
+        let t = TemporaryStore()
+        defer { t.remove() }
+        var settings = PuTTYSettings.defaults()
+        settings["ProxyMethod"] = "5"
+        settings["ProxyPassword"] = "s3cret-proxy-pw"
+        try t.store.save(settings, as: "via proxy")
+
+        #expect(try !t.contents().contains("s3cret-proxy-pw"))
+        #expect(t.secrets.all == ["via proxy": "s3cret-proxy-pw"])
+        let (loaded, _) = try t.store.load("via proxy")
+        #expect(loaded["ProxyPassword"] == "s3cret-proxy-pw")
+        #expect(loaded == settings.normalised())
+
+        // Saving without one removes it; so does deleting the session.
+        settings["ProxyPassword"] = ""
+        try t.store.save(settings, as: "via proxy")
+        #expect(t.secrets.all.isEmpty)
+        settings["ProxyPassword"] = "again"
+        try t.store.save(settings, as: "via proxy")
+        try t.store.delete("via proxy")
+        #expect(t.secrets.all.isEmpty)
+        // Default Settings is stored under its name, also for "".
+        try t.store.save(settings, as: "")
+        #expect(t.secrets.all == ["Default Settings": "again"])
+        #expect(try t.store.loadDefaults()["ProxyPassword"] == "again")
+    }
+
+    @Test func aPasswordSavedInTheFileMovesToTheSecretStore() throws {
+        let t = TemporaryStore()
+        defer { t.remove() }
+        try t.store.save(PuTTYSettings.defaults(), as: "old")
+        // As a file written before D-040 holds it.
+        let old = try t.contents().replacingOccurrences(of: "\"ProxyPassword\" : \"\"",
+                                                        with: "\"ProxyPassword\" : \"from-the-file\"")
+        #expect(old.contains("from-the-file"))
+        try t.write(old)
+
+        #expect(try t.store.load("old").settings["ProxyPassword"] == "from-the-file")
+        #expect(t.secrets.all == ["old": "from-the-file"])
+        #expect(try !t.contents().contains("from-the-file"))
+        #expect(try t.store.load("old").settings["ProxyPassword"] == "from-the-file")
+    }
+
+    @Test func aSecretThatCannotBeSavedLeavesTheFileAlone() throws {
+        struct Failing: SecretStore {
+            func secret(for session: String) -> String? { nil }
+            func setSecret(_ secret: String, for session: String) throws { throw SecretStoreError("locked") }
+            func removeSecret(for session: String) throws {}
+        }
+        let t = TemporaryStore()
+        defer { t.remove() }
+        try t.store.save(PuTTYSettings.defaults(), as: "s")
+        let before = try t.contents()
+        let failing = SavedSessionStore(fileURL: t.fileURL, secrets: Failing())
+        var settings = PuTTYSettings.defaults()
+        settings["HostName"] = "changed"
+        settings["ProxyPassword"] = "pw"
+        #expect(throws: SavedSessionStoreError.secret(message: "locked")) {
+            try failing.save(settings, as: "s")
+        }
+        #expect(try t.contents() == before)
+    }
+
+    /// The real keychain, under a service of its own that is removed again.
+    @Test func keychainSecretStoreRoundTrip() throws {
+        let keychain = KeychainSecretStore(service: "org.swiftputty.test.\(UUID().uuidString)")
+        defer { try? keychain.removeSecret(for: "session") }
+        #expect(keychain.secret(for: "session") == nil)
+        try keychain.setSecret("first", for: "session")
+        #expect(keychain.secret(for: "session") == "first")
+        try keychain.setSecret("sëcond", for: "session")        // replaces
+        #expect(keychain.secret(for: "session") == "sëcond")
+        try keychain.removeSecret(for: "session")
+        #expect(keychain.secret(for: "session") == nil)
+        try keychain.removeSecret(for: "session")               // already gone
+    }
+
+    /// Damaged files (M13): 500 deterministic mutations of a real file.
+    /// Each either loads or is reported; none crashes, and a file that
+    /// cannot be read is never rewritten.
+    @Test func mutatedFilesLoadOrAreReported() throws {
+        let t = TemporaryStore()
+        defer { t.remove() }
+        var settings = PuTTYSettings.defaults()
+        settings["HostName"] = "example.org"
+        settings["PortForwardings"] = "L8080=localhost:80,R2222=host:22"
+        settings["ProxyPassword"] = "pw"
+        try t.store.save(settings, as: "one")
+        try t.store.save(PuTTYSettings.defaults(), as: "two")
+        let original = Array(try t.contents().utf8)
+        let tokens = Array("{}[]\",:0-1e9\\u0000 truenull".utf8)
+
+        var state: UInt64 = 0x9E3779B97F4A7C15
+        func next(_ n: Int) -> Int {
+            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            return Int(state % UInt64(max(n, 1)))
+        }
+        for _ in 0..<500 {
+            var bytes = original
+            for _ in 0..<(1 + next(6)) {
+                let at = next(bytes.count)
+                switch next(4) {
+                case 0: bytes[at] = UInt8(truncatingIfNeeded: next(256))
+                case 1: bytes.insert(tokens[next(tokens.count)], at: at)
+                case 2: bytes.remove(at: at)
+                default: bytes.removeSubrange(at..<min(bytes.count, at + next(40)))
+                }
+            }
+            try t.write(String(decoding: bytes, as: UTF8.self))
+            let before = try t.contents()
+            do {
+                for name in try t.store.sessionNames() {
+                    _ = try t.store.load(name)
+                }
+            } catch is SavedSessionStoreError {
+                #expect(try t.contents() == before)     // never rewritten
+            }
+        }
+    }
+
+    /// M13: a directory that cannot be written. Saving and deleting are
+    /// reported; loading still works, and nothing is half-written.
+    @Test func anUnwritableStoreIsReportedAndStillLoads() throws {
+        let t = TemporaryStore()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700],
+                                                   ofItemAtPath: t.directory.path)
+            t.remove()
+        }
+        var settings = PuTTYSettings.defaults()
+        settings["HostName"] = "kept.example"
+        try t.store.save(settings, as: "kept")
+        let before = try t.contents()
+        try FileManager.default.setAttributes([.posixPermissions: 0o500],
+                                              ofItemAtPath: t.directory.path)
+
+        settings["HostName"] = "changed.example"
+        #expect(throws: SavedSessionStoreError.self) { try t.store.save(settings, as: "kept") }
+        #expect(throws: SavedSessionStoreError.self) { try t.store.delete("kept") }
+        #expect(try t.store.load("kept").settings["HostName"] == "kept.example")
+        #expect(try t.contents() == before)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: t.directory.path)
+        #expect(leftovers == ["Saved Sessions.json"])
     }
 
     @Test func theFileIsPrivateAndReplacedAtomically() throws {

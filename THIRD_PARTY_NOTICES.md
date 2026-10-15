@@ -44,6 +44,26 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     proxy command a second time only after prompting for it.
   - `0013-proxy-negotiator-init-reconnect.patch`: initialise the proxy
     negotiator's reconnect flag.
+  - `0014-preconnect-blank-credentials-in-copy.patch`: keep the proxy
+    credentials out of the pre-connect command, and in the session.
+  - `0015-local-command-posix-spawn-and-reap.patch`: start local commands
+    with posix_spawn, with only their own pipes, and always reap them.
+  - `0016-settings-malformed-colour-uses-default.patch`: a saved colour
+    that cannot be read loads as its default.
+  - `0017-eddsa-decode-checks-point-length.patch`: reject EdDSA public keys
+    whose point has the wrong length.
+  - `0018-settings-out-of-range-enums-load-as-default.patch`: unknown saved
+    values of two settings load as their defaults.
+  - `0019-terminal-negative-scrollback-is-none.patch`: a negative scrollback
+    size means no scrollback.
+  - `0020-clipme-combining-chars-use-base-style.patch`: copied combining
+    characters take their base character's attributes and colour.
+  - `0021-gss-macos-library-names.patch`: load macOS's own GSSAPI
+    libraries.
+  - `0022-fd-socket-no-sigpipe.patch`: writing to a local command that has
+    exited reports an error instead of raising SIGPIPE.
+  - At link time, `unix/utils/subprocess_waiter.c` is replaced by
+    SwiftPutty's own waiter, which installs no signal handler.
   - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as
     upstream's OS X build does, so the Meta-key settings are saved.
   - At compile time (no source change), the session-storage functions of

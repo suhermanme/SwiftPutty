@@ -1,0 +1,51 @@
+SwiftPutty local patch 0018
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (a damaged session aborts)
+
+Settings: the two hand-loaded enum settings load an unknown saved value
+as their default.
+
+  - BugHMAC2 was loaded as 2 minus the saved number, unchecked: a saved
+    value outside 0..2 gave a Conf value that save_open_settings could
+    not map back, and saving failed the "unmapped integer value"
+    assertion. Now mapped through conf_enum_auto_off_on, Auto if
+    unknown.
+  - ProxyMethod falls back to the old ProxyType; if neither held a known
+    value, confval was used uninitialised (undefined behaviour, then the
+    same assertion when saving). Now no proxy.
+
+Applies after patch 0016. Found by fuzzing
+(Core/tests/fuzz/fuzz_parsers.c).
+
+--- a/settings.c
++++ b/settings.c
+@@ -861,7 +861,9 @@
+     /* proxy settings */
+     {
+         int storageval = gppi_raw(sesskey, "ProxyMethod", -1);
+-        int confval;
++        /* No proxy if neither the current nor the old keyword holds a
++         * value we know (confval was left uninitialised then). */
++        int confval = PROXY_NONE;
+         if (!conf_enum_map_from_storage(&conf_enum_proxy_type,
+                                         storageval, &confval)) {
+             /*
+@@ -1046,9 +1048,15 @@
+ 
+     gppmap(sesskey, "PortForwardings", conf, CONF_portfwd);
+     {
+-        int i;
+-        i = gppi_raw(sesskey, "BugHMAC2", 0); conf_set_int(conf, CONF_sshbug_hmac2, 2-i);
+-        if (2-i == AUTO) {
++        int i, confval;
++        /* Through the storage enum, so that a value out of range loads
++         * as the default rather than as a Conf value that
++         * save_open_settings cannot map back (an assertion failure). */
++        i = gppi_raw(sesskey, "BugHMAC2", 0);
++        if (!conf_enum_map_from_storage(&conf_enum_auto_off_on, i, &confval))
++            confval = AUTO;
++        conf_set_int(conf, CONF_sshbug_hmac2, confval);
++        if (confval == AUTO) {
+             i = gppi_raw(sesskey, "BuggyMAC", 0);
+             if (i == 1)
+                 conf_set_int(conf, CONF_sshbug_hmac2, FORCE_ON);

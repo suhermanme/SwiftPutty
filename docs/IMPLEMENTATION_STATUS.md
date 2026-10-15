@@ -15,11 +15,86 @@
 | **M10** | Event log and session operations | **COMPLETE** (2026-10-15) |
 | **M11** | Additional PuTTY backends | **COMPLETE** (2026-10-15) |
 | **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
-| M13 | Security and reliability hardening | NOT STARTED |
+| **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
 | M14 | Performance pass | NOT STARTED |
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M13 — Security and reliability hardening
+
+Scope agreed at the start of the milestone: the proxy password in the
+keychain, a review of local commands (and the pre-connect command
+enabled), fuzzing, audits (R-7, passwords in logs, the upstream GPG
+signature), reliability stress tests, and GSSAPI on macOS.
+
+**Delivered** (bridge API v12)
+
+- **Proxy password in the keychain** (D-040): never written to the
+  sessions file; moved there from older files when a session loads; a
+  keychain failure leaves the file untouched.
+- **Local commands reviewed** (D-041): `posix_spawn` with only the
+  command's own pipes, signals reset (patch 0015); every command reaped
+  by a per-pid waiter (`spb_subprocess.c`) instead of upstream's
+  process-wide SIGCHLD handler and `waitpid(-1)`; writes to an exited
+  command no longer raise SIGPIPE (patch 0022). **Command to run before
+  connection** is offered on the Connection panel; upstream exposed the
+  proxy password through `%pass` and wiped the session's proxy
+  credentials (patch 0014).
+- **Fuzzing** (D-042): `spb_fuzz_terminal` (server output through the
+  whole terminal path, frames and RTF copy) and `spb_fuzz_parsers` (host
+  keys, CA keys and expressions, every saved and legacy keyword), run
+  briefly by ctest in every build, plus a Swift test of 500 mutated
+  sessions files. Upstream bugs found and fixed: a malformed colour
+  aborted (0016); **a short Ed25519/Ed448 point aborted while decoding a
+  server's host key, before verification** (0017: a malicious server
+  could end every session of the app); out-of-range `BugHMAC2` and an
+  uninitialised proxy type (0018); a negative scrollback size aborted
+  (0019); copying combining characters read uninitialised attributes
+  (0020).
+- **Audits**: R-7 closed (unreachable on Unix; ARCHITECTURE.md §11);
+  session logs never hold a typed password, in any log type (with a
+  control run that proves the check sees one); the vendored source
+  verified against PuTTY's GPG signature and key chain
+  (`scripts/verify-upstream.sh`).
+- **Reliability**: reset mid-transfer, file descriptor exhaustion, 32
+  busy sessions released and the core shut down at once, an unwritable
+  sessions directory.
+- **GSSAPI on macOS** (D-043, patch 0021): `GSS.framework` and
+  `libgssapi_krb5.dylib` load with every function bound; logins with
+  GSSAPI on are not delayed.
+
+**Tests and results**
+
+Clean build, `scripts/test-all.sh --clean`, arm64 host, Xcode 27.0 /
+Swift 6.4 / CMake 4.4.3.
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo), patches 0001–0022 | PASS |
+| C tests (8 programs, including `spb_fuzz_terminal` and `spb_fuzz_parsers`); new: pre-connect command and reaping, logs without passwords, short Ed25519 key, GSSAPI libraries and timing, reset mid-transfer, SIGPIPE from a local command, descriptor exhaustion, busy shutdown | PASS |
+| `leaks --atExit`: the five C test programs | PASS (0 leaks of ours; 18 in Apple's Heimdal `krb5_get_credentials` excluded in `spb_ssh_test`, D-043) |
+| C tests under ASan + UBSan / TSan (Debug) | PASS |
+| Longer fuzzing by hand: 550,000 parser inputs (100,000 under ASan+UBSan), 9,000 terminal inputs under ASan+UBSan | PASS after patches 0016–0020 |
+| `swift test` (122 tests, 27 suites; new: keychain and secret store, mutated and unwritable sessions files) | PASS |
+| `swift test --sanitize=address` / `--sanitize=thread` | PASS |
+| App Debug build; Release build, universal | PASS |
+| `scripts/verify-upstream.sh` (network) | PASS: good signature by PuTTY's release key; archive identical to `Vendor/putty` |
+
+**Limitations / not done**
+
+- A GSSAPI login is not tested (needs a Kerberos realm and a server
+  keytab); GSSAPI and X11 rows stay PARTIAL.
+- The fuzzing driver is not coverage-guided; a libFuzzer campaign with
+  an LLVM toolchain (`-DSPB_LIBFUZZER=ON`) is left for M17.
+- Developer builds are ad-hoc signed, so macOS may ask once per rebuild
+  before the app reads its keychain items (D-040; M15 signs properly).
+- Patches 0010–0022 are not yet reported upstream. **0017 should be
+  reported privately** (a server can abort the client).
+- From reading `unix/network.c` (not tested): a forwarding listener whose
+  `accept()` fails while descriptors are exhausted stays readable, so
+  the loop would retry it every iteration until descriptors free up, as
+  upstream does. Not changed.
 
 ## M12 — Configuration parity pass
 

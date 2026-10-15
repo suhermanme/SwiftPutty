@@ -88,11 +88,22 @@ function(swiftputty_define_core)
   endforeach()
   set(upstream_objects ${filtered_objects})
 
+  # Exclude unix/utils/subprocess_waiter.c: its SIGCHLD handler and
+  # waitpid(-1) would reap every child of the application. Replaced by
+  # src/spb_subprocess.c, which waits for each command's pid alone (D-041).
+  set(filtered_objects)
+  foreach(objs IN LISTS upstream_objects)
+    list(APPEND filtered_objects "$<FILTER:${objs},EXCLUDE,/subprocess_waiter\\.c\\.o$>")
+  endforeach()
+  set(upstream_objects ${filtered_objects})
+
   add_library(swiftputty-core STATIC
     # SwiftPutty bridge
     ${B}/src/spb_core.c
     ${B}/src/spb_eventloop.c
     ${B}/src/spb_hostca.c
+    ${B}/src/spb_subprocess.c
+    ${B}/src/spb_gss.c
     ${B}/src/spb_input.c
     ${B}/src/spb_platform.c
     ${B}/src/spb_seat.c
@@ -161,6 +172,7 @@ function(swiftputty_define_core)
     ${B}/src/spb_input.c ${B}/src/spb_seat.c ${B}/src/spb_session.c
     ${B}/src/spb_terminal.c
     ${B}/src/spb_settings.c ${B}/src/spb_storage.c
+    ${B}/src/spb_hostca.c ${B}/src/spb_subprocess.c ${B}/src/spb_gss.c
     TARGET_DIRECTORY swiftputty-core
     PROPERTIES COMPILE_OPTIONS
       "-Wall;-Wextra;-Werror;-Wno-unused-parameter;-Wdeprecated-declarations")
@@ -222,6 +234,36 @@ function(swiftputty_define_core)
   target_compile_options(spb_backends_test PRIVATE
     -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
   add_test(NAME spb_backends_test COMMAND spb_backends_test)
+
+  # Fuzzing (M13, D-042): libFuzzer-style harnesses. Apple's clang has
+  # no libFuzzer, so by default they link with a small driver that runs
+  # the seed corpus and a fixed number of mutated inputs; ctest runs a
+  # short, deterministic pass (in the sanitizer builds too). With an
+  # LLVM clang, -DSPB_LIBFUZZER=ON links them with -fsanitize=fuzzer.
+  option(SPB_LIBFUZZER "Link the fuzz harnesses with libFuzzer" OFF)
+  foreach(target IN ITEMS terminal parsers)
+    if(SPB_LIBFUZZER)
+      add_executable(spb_fuzz_${target} ${B}/tests/fuzz/fuzz_${target}.c)
+      target_compile_options(spb_fuzz_${target} PRIVATE -fsanitize=fuzzer)
+      target_link_options(spb_fuzz_${target} PRIVATE -fsanitize=fuzzer)
+    else()
+      add_executable(spb_fuzz_${target} ${B}/tests/fuzz/fuzz_${target}.c
+        ${B}/tests/fuzz/spb_fuzz_driver.c)
+    endif()
+    set_property(TARGET spb_fuzz_${target} PROPERTY LINK_LIBRARIES
+      swiftputty-core)
+    target_include_directories(spb_fuzz_${target} PRIVATE ${B}/include)
+    target_compile_options(spb_fuzz_${target} PRIVATE
+      -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+  endforeach()
+  if(NOT SPB_LIBFUZZER)
+    add_test(NAME spb_fuzz_terminal COMMAND spb_fuzz_terminal -runs=400
+      -artifact=${CMAKE_BINARY_DIR}/fuzz_terminal.crash
+      ${B}/tests/fuzz/corpus/terminal)
+    add_test(NAME spb_fuzz_parsers COMMAND spb_fuzz_parsers -runs=4000
+      -artifact=${CMAKE_BINARY_DIR}/fuzz_parsers.crash
+      ${B}/tests/fuzz/corpus/parsers)
+  endif()
 
   # Link every archive member, not just the ones a program happens to
   # reference, so that any unresolved symbol in the core fails the build.

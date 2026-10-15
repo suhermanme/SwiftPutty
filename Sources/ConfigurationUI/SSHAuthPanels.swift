@@ -274,9 +274,11 @@ struct GSSAPIPanel: View {
                             keyword: .gssapiFwd)
             PreferenceListSetting(model: model, label: "Preference order for GSSAPI libraries:",
                                   keyword: .gssLibs,
-                                  names: ["libgssapi": "libgssapi (Heimdal)",
-                                          "libgssapi_krb5": "libgssapi_krb5 (MIT Kerberos)",
-                                          "libgss": "libgss (Sun)",
+                                  // unix/gss.c's macOS names (patch 0021); the
+                                  // keywords are PuTTY's on every platform.
+                                  names: ["libgssapi": "GSS.framework (Heimdal)",
+                                          "libgssapi_krb5": "libgssapi_krb5 (MIT Kerberos interface)",
+                                          "libgss": "libgss (if installed)",
                                           "custom": "User-supplied GSSAPI library"])
             FileSetting(model: model, label: "User-supplied GSSAPI library path:",
                         keyword: .gssCustom, panelTitle: "Select library file")

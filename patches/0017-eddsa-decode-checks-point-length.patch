@@ -1,0 +1,36 @@
+SwiftPutty local patch 0017
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be, PRIVATELY (a server can
+          abort the client before its host key is checked)
+
+EdDSA: reject a point encoding that is not exactly fieldBytes long.
+
+eddsa_decode() turned the encoded point into an mp_int sized by its
+length, then cleared bit fieldBytes*8-1, which mp_set_bit asserts is
+within the number. An Ed25519 or Ed448 public key whose point string is
+too short therefore failed that assertion (PuTTY keeps assertions in
+release builds) and aborted the program. Public keys are decoded from
+untrusted input in several places, among them the server's host key
+during key exchange (kex2-client.c), before it is verified: a server
+could end the client. In SwiftPutty, where every session shares one
+process, it would end all of them.
+
+Found by fuzzing (Core/tests/fuzz/fuzz_parsers.c, through the host CA
+key parser).
+
+--- a/crypto/ecc-ssh.c
++++ b/crypto/ecc-ssh.c
+@@ -526,6 +526,13 @@
+ {
+     assert(curve->type == EC_EDWARDS);
+ 
++    /* RFC 8032 encodes a point in exactly fieldBytes bytes. A shorter
++     * string would make an mp_int too small for the mp_set_bit below
++     * (an assertion failure, so a server could end the client with
++     * its host key); a longer one is not a valid encoding either. */
++    if (encoded.len != curve->fieldBytes)
++        return NULL;
++
+     mp_int *y = mp_from_bytes_le(encoded);
+ 
+     /* The topmost bit of the encoding isn't part of y, so it stores

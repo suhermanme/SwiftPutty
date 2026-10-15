@@ -1256,6 +1256,103 @@ static void test_environment(fixture *f)
     release_session();
 }
 
+/* M13: with GSSAPI on (PuTTY's defaults) and macOS's libraries now
+ * loaded (patch 0021), a login to a server without GSSAPI still works
+ * and is not held up by Kerberos. Timed against GSSAPI off. */
+static void test_gssapi_defaults_do_not_delay(fixture *f)
+{
+    double took[2];
+    for (int on = 0; on < 2; on++) {
+        const char *const gss[] = { "AuthGSSAPI", on ? "1" : "0",
+                                    "AuthGSSAPIKEX", on ? "1" : "0", NULL };
+        double start = now_seconds();
+        open_session_with(f->port, "tester", false, gss);
+        CHECK(wait_screen("tester@127.0.0.1's password:", 30));
+        took[on] = now_seconds() - start;
+        type("weasel\r");
+        CHECK(wait_rec(is_connected, 20));
+        spb_session_close(session);
+        CHECK(wait_rec(is_final, 10));
+        release_session();
+    }
+    fprintf(stderr, "  to the password prompt: %.2f s without GSSAPI, "
+            "%.2f s with it\n", took[0], took[1]);
+    CHECK(took[1] < took[0] + 5);
+}
+
+/* M13: session logs never hold a password, whatever is logged
+ * (CONF_logomitpass, on by default): printable output, all session
+ * output, SSH packets, and SSH packets with raw data. A wrong password
+ * and the right one are typed; neither may reach the file. */
+static void test_logs_omit_passwords(fixture *f)
+{
+    /* The fifth run is the control: with "Omit known password fields"
+     * off, the packet log does show the password, so the check can see
+     * one. */
+    static const char *const types[] = { "1", "2", "3", "4", "3" };
+    for (size_t i = 0; i < 5; i++) {
+        bool control = i == 4;
+        char path[700];
+        snprintf(path, sizeof(path), "%s/log-%zu.txt", workdir, i);
+        const char *const logging[] = {
+            "LogType", types[i], "LogFileName", path, "LogFileClash", "1",
+            "LogFlush", "1", "SSHLogOmitPasswords", control ? "0" : "1", NULL };
+        open_session_with(f->port, "tester", false, logging);
+        CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+        type("Wrong-Secret-9\r");
+        CHECK(wait_screen("Access denied\n", 20));
+        type("weasel\r");
+        CHECK(wait_rec(is_connected, 20));
+        type("echo logged-$((3*3))\r");
+        CHECK(wait_screen("\nlogged-9\n", 20));
+        spb_session_close(session);
+        CHECK(wait_rec(is_final, 10));
+        release_session();
+
+        FILE *fp = fopen(path, "rb");
+        CHECK(fp != NULL);
+        if (!fp)
+            continue;
+        static char log[1 << 20];
+        size_t n = fread(log, 1, sizeof(log) - 1, fp);
+        fclose(fp);
+        log[n] = 0;
+        /* The log is not empty, and for packet logs it has the request
+         * that carried the password. */
+        CHECK(memmem(log, n, "logged-9", 8) != NULL || types[i][0] >= '3');
+        if (types[i][0] >= '3')
+            CHECK(memmem(log, n, "SSH2_MSG_USERAUTH_REQUEST", 25) != NULL);
+        /* Packet logs are hex dumps, 16 bytes a line, so a password can
+         * be split between lines: look in the dumped bytes too. */
+        static char bytes[1 << 20];
+        size_t nb = 0;
+        for (char *line = log; line && *line; ) {
+            char *end = strchr(line, '\n');
+            unsigned off;
+            if (sscanf(line, "  %8x  ", &off) == 1 && line[10] == ' ') {
+                for (int k = 0; k < 16; k++) {
+                    unsigned b;
+                    if (sscanf(line + 12 + 3 * k, "%2x", &b) != 1)
+                        break;
+                    bytes[nb++] = (char)b;
+                }
+            }
+            line = end ? end + 1 : NULL;
+        }
+        bool leaked = memmem(log, n, "weasel", 6) ||
+                      memmem(log, n, "Wrong-Secret-9", 14) ||
+                      memmem(bytes, nb, "weasel", 6) ||
+                      memmem(bytes, nb, "Wrong-Secret-9", 14);
+        if (leaked != control) {
+            fprintf(stderr, "  LogType %s%s: a password is %sin the log\n",
+                    types[i], control ? " (not omitting)" : "",
+                    leaked ? "" : "not ");
+            failures++;
+        }
+        unlink(path);
+    }
+}
+
 /* M12: connection sharing. A second session to the same server reuses
  * the first one's connection: no login, a sharing downstream (backend
  * cfg info -1), and the upstream's close warning names it. Sessions are
@@ -1378,6 +1475,11 @@ static void test_host_cas(void)
     spb_string_free(info);
     info = spb_host_ca_key_info("not a key!", NULL);
     CHECK(info && !strncmp(info, "Cannot decode key", 17));
+    spb_string_free(info);
+    /* An Ed25519 key whose point is one byte long: refused, not an
+     * assertion failure (patch 0017; found by fuzzing). */
+    info = spb_host_ca_key_info("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAAQA=", NULL);
+    CHECK(info && strncmp(info, "ssh-ed25519 255 SHA256:", 23) != 0);
     spb_string_free(info);
 
     spb_host_ca *ca = spb_host_ca_new_default();
@@ -1580,6 +1682,8 @@ int main(void)
     test_session_operations(&server);
     test_ssh_jump_proxy(&server);
     test_environment(&server);
+    test_logs_omit_passwords(&server);
+    test_gssapi_defaults_do_not_delay(&server);
     test_connection_sharing(&server);
     test_manual_host_keys();
     test_host_cas();

@@ -191,7 +191,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | TCP keepalives (`CONF_tcp_keepalives`) | Checkbox | COMPLETE | reconnect |  |
 | Internet protocol version (`CONF_addressfamily`) | Radio Auto/IPv4/IPv6 | COMPLETE | reconnect |  |
 | Logical name of remote host (`CONF_loghost`) | Text field | COMPLETE | reconnect | Host-key lookup name |
-| Command to run before connection (`CONF_pre_connect_command`) | — | NOT STARTED | reconnect | Deferred to M13: **security review needed** before enabling (runs a local command) |
+| Command to run before connection (`CONF_pre_connect_command`) | Connection panel edit box, as Windows ("Command to run at connection event") | COMPLETE | reconnect | M13 review (D-041): spawned with `posix_spawn`, no inherited descriptors, reaped; `%user`/`%pass` refused without touching the proxy credentials (patch 0014). `spb_backends_test` `test_preconnect` |
 
 ## Connection → Data
 
@@ -213,7 +213,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Consider proxying local host (`CONF_even_proxy_localhost`) | Checkbox | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
 | DNS at proxy end (`CONF_proxy_dns`) | Radio No/Auto/Yes | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
 | Proxy username (`CONF_proxy_username`) | Text field | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
-| Proxy password (`CONF_proxy_password`) | Secure field | PARTIAL | reconnect | Works for SOCKS 5 and HTTP (M12). Still saved in the session file as PuTTY does; keeping it out of the file (Keychain) is deferred to M13 |
+| Proxy password (`CONF_proxy_password`) | Secure field; saved in the macOS keychain, **never in the sessions file** (D-040) | COMPLETE | reconnect | Deviation: PuTTY saves it in plain text. A password in a file from before M13 moves to the keychain when its session loads. M13: `SavedSessionTests` (in-memory and real keychain) |
 | Telnet/local proxy command (`CONF_proxy_telnet_command`) | Text field | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
 | Print proxy diagnostics (`CONF_proxy_log_to_term`) | Radio | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
 
@@ -232,7 +232,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Kex algorithm order (`CONF_ssh_kexlist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | future | Shown mid-session (SSH-2); used at the next rekey. Used at the next key exchange |
-| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | PARTIAL | future | macOS GSS: `unix/gss.c` dlopen; feasibility TBD (M09). Saved and passed to PuTTY; upstream's Unix GSSAPI loader looks for .so library names that macOS lacks, so GSSAPI is unavailable (decide in M13/M15) |
+| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | PARTIAL | future | M13 (D-043, patch 0021): macOS's `GSS.framework` and `libgssapi_krb5.dylib` load with every function bound (`spb_bridge_test`); logins with GSSAPI on are not delayed. A GSSAPI login is not tested (needs a Kerberos realm and server keytab) |
 | Max minutes before rekey (`CONF_ssh_rekey_time`) | Number field | COMPLETE | runtime | May rekey immediately if shortened |
 | Minutes between GSS checks (`CONF_gssapirekey`) | Number field | COMPLETE | runtime | |
 | Max data before rekey (`CONF_ssh_rekey_data`) | Text field (e.g. `1G`) | COMPLETE | runtime | |
@@ -257,10 +257,10 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Allow username changes (`CONF_change_username`) | Checkbox | COMPLETE | reconnect | |
 | Private key file (`CONF_keyfile`) | Edit box + Browse… (NSOpenPanel) | COMPLETE | reconnect | PPK + OpenSSH formats via upstream. PPK files (upstream; OpenSSH keys must be converted with puttygen, as in PuTTY). Unencrypted and passphrase-protected keys tested against uppity (M09); the passphrase is asked in the terminal |
 | Certificate (`CONF_detached_cert`) | Edit box + Browse… | COMPLETE | reconnect | |
-| Authentication plugin (`CONF_auth_plugin`) | Edit box | COMPLETE | reconnect | Runs a local command; review in M13. Runs a local command; review in M13 |
+| Authentication plugin (`CONF_auth_plugin`) | Edit box | COMPLETE | reconnect | Runs a local command: reviewed in M13 (D-041), started and reaped as every local command (patch 0015) |
 | Attempt GSSAPI auth (`CONF_try_gssapi_auth`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
 | Allow GSSAPI delegation (`CONF_gssapifwd`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
-| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list + path with Browse… | PARTIAL | reconnect | Depends on Unix GSS libs on macOS. See GSSAPI key exchange |
+| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list (GSS.framework, libgssapi_krb5, libgss, user-supplied) + path with Browse… | PARTIAL | reconnect | macOS names for upstream's keywords (patch 0021). See GSSAPI key exchange |
 
 ## Connection → SSH → TTY / X11 / Tunnels / Bugs
 

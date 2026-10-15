@@ -17,6 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
@@ -80,6 +83,10 @@ static void *server_main(void *arg)
         int fd = accept(srv->listen_fd, NULL, NULL);
         if (fd < 0)
             return NULL;               /* listener closed: stop */
+        /* The client may vanish mid-echo (sessions released while
+         * busy): a failed write, not SIGPIPE in the test process. */
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
         if (srv->mode == SERVER_GREET_CLOSE) {
             ssize_t w = write(fd, "bye\n", 4);
             (void)w;
@@ -731,6 +738,8 @@ static void test_concurrent_sessions(server *echo)
     CHECK(spb_debug_uxsel_fds() == fds_before);
 }
 
+static void send_lots(spb_session *s, size_t total);
+
 static void test_shutdown(server *echo)
 {
     recorder r;
@@ -744,10 +753,32 @@ static void test_shutdown(server *echo)
     CHECK(!spb_core_shutdown());       /* refused: open handle */
     CHECK(spb_core_is_initialised());
 
+    /* M13: 32 more sessions, each in the middle of a transfer. */
+    enum { BUSY = 32 };
+    recorder busy_rec[BUSY];
+    spb_session *busy[BUSY];
+    for (int i = 0; i < BUSY; i++) {
+        rec_init(&busy_rec[i]);
+        spb_settings *bs = raw_settings("127.0.0.1", echo->port);
+        busy[i] = new_session(bs, &busy_rec[i]);
+        spb_settings_free(bs);
+        spb_session_start(busy[i]);
+    }
+    for (int i = 0; i < BUSY; i++) {
+        CHECK(wait_state(&busy_rec[i], SPB_SESSION_CONNECTED, 10));
+        send_lots(busy[i], 1 << 20);
+    }
+
     /* Shutdown straight after release: the queued teardown still runs. */
+    for (int i = 0; i < BUSY; i++)
+        spb_session_release(busy[i]);
     spb_session_release(s);
     CHECK(spb_core_shutdown());
     CHECK(r.released);
+    for (int i = 0; i < BUSY; i++) {
+        CHECK(busy_rec[i].released);
+        rec_destroy(&busy_rec[i]);
+    }
     CHECK(spb_debug_live_sessions() == 0);
     CHECK(!spb_core_is_initialised());
     CHECK(!spb_core_barrier());
@@ -758,6 +789,162 @@ static void test_shutdown(server *echo)
     CHECK(spb_session_create(later, NULL, NULL, &err) == NULL);
     spb_string_free(err);
     spb_settings_free(later);
+}
+
+/* ---------- Reliability (M13) ---------- */
+
+static bool pred_ended(recorder *r, const void *arg)
+{
+    return r->nstates > 0 &&
+        (r->states[r->nstates - 1] == SPB_SESSION_CLOSED ||
+         r->states[r->nstates - 1] == SPB_SESSION_FAILED);
+}
+
+static void send_lots(spb_session *s, size_t total)
+{
+    static char chunk[65536];
+    memset(chunk, 'x', sizeof(chunk));
+    for (size_t off = 0; off < total; off += sizeof(chunk))
+        spb_session_send(s, chunk, sizeof(chunk));
+}
+
+/* The peer resets the connection in the middle of a 4 MiB send: the
+ * session ends with the error, and its descriptors are given back. */
+static void test_reset_mid_transfer(void)
+{
+    size_t fds_before = spb_debug_uxsel_fds();
+    int port, lfd = listen_on_loopback(&port);
+    recorder r;
+    rec_init(&r);
+    spb_settings *settings = raw_settings("127.0.0.1", port);
+    spb_session *s = new_session(settings, &r);
+    spb_settings_free(settings);
+    spb_session_start(s);
+    int peer = accept(lfd, NULL, NULL);
+    CHECK(peer >= 0);
+    CHECK(wait_state(&r, SPB_SESSION_CONNECTED, 10));
+    send_lots(s, 4 << 20);
+    char buf[65536];
+    size_t got = 0;
+    while (got < 256 * 1024) {
+        ssize_t n = read(peer, buf, sizeof(buf));
+        if (n <= 0)
+            break;
+        got += (size_t)n;
+    }
+    struct linger hard = { 1, 0 };     /* close with RST */
+    setsockopt(peer, SOL_SOCKET, SO_LINGER, &hard, sizeof(hard));
+    close(peer);
+    CHECK(rec_wait(&r, pred_ended, NULL, 10));
+    pthread_mutex_lock(&r.lock);
+    CHECK(r.last_detail != NULL);
+    pthread_mutex_unlock(&r.lock);
+    spb_session_release(s);
+    CHECK(rec_wait(&r, pred_released, NULL, 10));
+    CHECK(spb_debug_uxsel_fds() == fds_before);
+    rec_destroy(&r);
+    close(lfd);
+}
+
+/* A local proxy command that exits while the session is still writing
+ * to it: the write fails with EPIPE, and SIGPIPE (left at its default
+ * here, as an application has it) does not kill the process. */
+static void test_local_command_exits_while_written(void)
+{
+    recorder r;
+    rec_init(&r);
+    spb_settings *settings = raw_settings("target.invalid", 22);
+    spb_settings_set(settings, "ProxyMethod", "5");
+    spb_settings_set(settings, "ProxyTelnetCommand", "head -c 1000 > /dev/null");
+    spb_session *s = new_session(settings, &r);
+    spb_settings_free(settings);
+    spb_session_start(s);
+    CHECK(wait_state(&r, SPB_SESSION_CONNECTED, 10));
+    send_lots(s, 4 << 20);
+    CHECK(rec_wait(&r, pred_ended, NULL, 20));
+    spb_session_release(s);
+    CHECK(rec_wait(&r, pred_released, NULL, 10));
+    rec_destroy(&r);
+}
+
+static int highest_open_fd(void)
+{
+    int top = -1;
+    for (int fd = 0; fd < 4096; fd++)
+        if (fcntl(fd, F_GETFD) != -1)
+            top = fd;
+    return top;
+}
+
+/* Out of file descriptors: sessions that cannot get a socket fail with
+ * the error, the others connect, and everything works again once
+ * descriptors are available. The listener never accepts, so the
+ * connections complete in its backlog without using descriptors here. */
+static void test_descriptor_exhaustion(server *echo)
+{
+    enum { N = 24 };
+    size_t fds_before = spb_debug_uxsel_fds();
+    int port, lfd = listen_on_loopback(&port);
+    struct rlimit old;
+    getrlimit(RLIMIT_NOFILE, &old);
+    struct rlimit tight = old;
+    tight.rlim_cur = (rlim_t)highest_open_fd() + 1 + 8;
+    CHECK(setrlimit(RLIMIT_NOFILE, &tight) == 0);
+
+    recorder r[N];
+    spb_session *s[N];
+    spb_settings *settings = raw_settings("127.0.0.1", port);
+    for (int i = 0; i < N; i++) {
+        rec_init(&r[i]);
+        s[i] = new_session(settings, &r[i]);
+        spb_session_start(s[i]);
+    }
+    spb_settings_free(settings);
+    int connected = 0, failed = 0;
+    for (int i = 0; i < N; i++) {
+        spb_session_state ok = SPB_SESSION_CONNECTED, bad = SPB_SESSION_FAILED;
+        double deadline = 10;
+        while (!rec_wait(&r[i], pred_state, &ok, 0.05) &&
+               !rec_wait(&r[i], pred_state, &bad, 0.05) && (deadline -= 0.1) > 0)
+            ;
+        pthread_mutex_lock(&r[i].lock);
+        spb_session_state last = r[i].nstates ? r[i].states[r[i].nstates - 1]
+                                              : SPB_SESSION_CREATED;
+        if (last == SPB_SESSION_CONNECTED)
+            connected++;
+        if (last == SPB_SESSION_FAILED) {
+            failed++;
+            CHECK(r[i].last_detail && strstr(r[i].last_detail, "Too many open files"));
+        }
+        pthread_mutex_unlock(&r[i].lock);
+    }
+    CHECK(connected > 0);
+    CHECK(failed > 0);
+    CHECK(connected + failed == N);
+
+    for (int i = 0; i < N; i++)
+        spb_session_release(s[i]);
+    for (int i = 0; i < N; i++) {
+        CHECK(rec_wait(&r[i], pred_released, NULL, 10));
+        rec_destroy(&r[i]);
+    }
+    CHECK(setrlimit(RLIMIT_NOFILE, &old) == 0);
+    close(lfd);
+    CHECK(spb_debug_uxsel_fds() == fds_before);
+
+    /* And a new session works. */
+    recorder after;
+    rec_init(&after);
+    settings = raw_settings("127.0.0.1", echo->port);
+    spb_session *again = new_session(settings, &after);
+    spb_settings_free(settings);
+    spb_session_start(again);
+    CHECK(wait_state(&after, SPB_SESSION_CONNECTED, 10));
+    spb_session_send(again, "ok\n", 3);
+    CHECK(wait_output(&after, 3, 10));
+    spb_session_release(again);
+    CHECK(rec_wait(&after, pred_released, NULL, 10));
+    rec_destroy(&after);
 }
 
 /* ---------- Session log (M05) ---------- */
@@ -1090,6 +1277,9 @@ int main(void)
     test_failures();
     test_release_paths(&echo);
     test_concurrent_sessions(&echo);
+    test_reset_mid_transfer();
+    test_local_command_exits_while_written();
+    test_descriptor_exhaustion(&echo);
     test_session_log(&echo, base);
     test_prepare_session(&echo);
     test_reconfigure(&echo, base);

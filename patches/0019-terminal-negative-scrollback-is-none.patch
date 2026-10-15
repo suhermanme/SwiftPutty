@@ -1,0 +1,27 @@
+SwiftPutty local patch 0019
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (a setting aborts)
+
+Terminal: a negative scrollback size means no scrollback.
+
+Every front end passes CONF_savelines to term_size() unchecked, and the
+configuration box's "Lines of scrollback" accepts a negative number.
+term_size() then failed its assertion that the scrollback fits the new
+size, aborting the program when such a session started or the setting
+was applied. Now a negative size is treated as 0. Applies after patch
+0004. Found by fuzzing (Core/tests/fuzz/fuzz_parsers.c).
+
+--- a/terminal/terminal.c
++++ b/terminal/terminal.c
+@@ -2191,6 +2191,11 @@
+     int sblen;
+     int save_alt_which = term->alt_which;
+ 
++    /* A negative scrollback size (e.g. "ScrollbackLines=-1" in a saved
++     * session; the configuration box accepts it) means none. Otherwise
++     * the scrollback trimming below fails its assertion. */
++    if (newsavelines < 0) newsavelines = 0;
++
+     if (newrows == term->rows && newcols == term->cols &&
+         newsavelines == term->savelines)
+         return;                        /* nothing to do */

@@ -1,0 +1,79 @@
+SwiftPutty local patch 0021
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; could be offered (macOS support)
+
+GSSAPI on macOS: load the system's GSSAPI libraries.
+
+The Unix GSSAPI loader dlopens libgssapi.so.2, libgssapi_krb5.so.2 and
+libgss.so.1, none of which exist on macOS, so GSSAPI key exchange and
+authentication never worked there unless the user typed a library path.
+On macOS the three slots now load GSS.framework (Apple's Heimdal-based
+GSSAPI), libgssapi_krb5.dylib (its MIT-compatible interface) and
+libgss.dylib (if one is installed), and the list shows those names. All
+three of Apple's export every function PuTTY binds. The settings
+keywords are unchanged, so saved sessions mean the same thing on every
+platform.
+
+--- a/unix/gss.c
++++ b/unix/gss.c
+@@ -8,11 +8,34 @@
+ 
+ #if !defined NO_LIBDL && !defined STATIC_GSSAPI && !defined NO_GSSAPI
+ 
++/*
++ * macOS has no .so libraries: its GSSAPI is GSS.framework (Heimdal), and
++ * libgssapi_krb5.dylib is its MIT-compatible interface. The keywords
++ * (and so saved sessions) are the same on every platform.
++ */
++#ifdef __APPLE__
++#define GSSLIB_HEIMDAL "/System/Library/Frameworks/GSS.framework/GSS"
++#define GSSLIB_HEIMDAL_NAME "GSS.framework"
++#define GSSLIB_MIT "libgssapi_krb5.dylib"
++#define GSSLIB_SUN "libgss.dylib"
++#else
++#define GSSLIB_HEIMDAL "libgssapi.so.2"
++#define GSSLIB_HEIMDAL_NAME GSSLIB_HEIMDAL
++#define GSSLIB_MIT "libgssapi_krb5.so.2"
++#define GSSLIB_SUN "libgss.so.1"
++#endif
++
+ const int ngsslibs = 4;
+ const char *const gsslibnames[4] = {
++#ifdef __APPLE__
++    "GSS.framework (Heimdal)",
++    "libgssapi_krb5 (MIT Kerberos interface)",
++    "libgss (if installed)",
++#else
+     "libgssapi (Heimdal)",
+     "libgssapi_krb5 (MIT Kerberos)",
+     "libgss (Sun)",
++#endif
+     "User-specified GSSAPI library",
+ };
+ const struct keyvalwhere gsslibkeywords[] = {
+@@ -66,19 +89,19 @@
+     list->nlibraries = 0;
+ 
+     /* Heimdal's GSSAPI Library */
+-    if ((gsslib = dlopen("libgssapi.so.2", RTLD_LAZY)) != NULL)
++    if ((gsslib = dlopen(GSSLIB_HEIMDAL, RTLD_LAZY)) != NULL)
+         gss_init(&list->libraries[list->nlibraries++], gsslib,
+-                 0, "Using GSSAPI from libgssapi.so.2");
++                 0, "Using GSSAPI from " GSSLIB_HEIMDAL_NAME);
+ 
+     /* MIT Kerberos's GSSAPI Library */
+-    if ((gsslib = dlopen("libgssapi_krb5.so.2", RTLD_LAZY)) != NULL)
++    if ((gsslib = dlopen(GSSLIB_MIT, RTLD_LAZY)) != NULL)
+         gss_init(&list->libraries[list->nlibraries++], gsslib,
+-                 1, "Using GSSAPI from libgssapi_krb5.so.2");
++                 1, "Using GSSAPI from " GSSLIB_MIT);
+ 
+     /* Sun's GSSAPI Library */
+-    if ((gsslib = dlopen("libgss.so.1", RTLD_LAZY)) != NULL)
++    if ((gsslib = dlopen(GSSLIB_SUN, RTLD_LAZY)) != NULL)
+         gss_init(&list->libraries[list->nlibraries++], gsslib,
+-                 2, "Using GSSAPI from libgss.so.1");
++                 2, "Using GSSAPI from " GSSLIB_SUN);
+ 
+     /* User-specified GSSAPI library */
+     gsspath = conf_get_filename(conf, CONF_ssh_gss_custom)->path;

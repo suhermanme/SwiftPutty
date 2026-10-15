@@ -1,0 +1,38 @@
+SwiftPutty local patch 0016
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (a damaged session aborts)
+
+Settings: a saved colour that is not three numbers loads as the default.
+
+load_open_settings() set a colour only when its saved value parsed as
+"r,g,b". On a fresh Conf a damaged value (e.g. "Colour20=-1" in a
+hand-edited or corrupted session) left the colour missing, and the next
+conf_get_int_int() on it (saving the settings, or building the palette
+when the session starts) failed an assertion and aborted the program.
+Found by fuzzing (Core/tests/fuzz/fuzz_parsers.c).
+
+--- a/settings.c
++++ b/settings.c
+@@ -994,11 +994,17 @@
+         int c0, c1, c2;
+         sprintf(buf, "Colour%d", i);
+         buf2 = gpps_raw(sesskey, buf, defaults[i]);
+-        if (sscanf(buf2, "%d,%d,%d", &c0, &c1, &c2) == 3) {
+-            conf_set_int_int(conf, CONF_colours, i*3+0, c0);
+-            conf_set_int_int(conf, CONF_colours, i*3+1, c1);
+-            conf_set_int_int(conf, CONF_colours, i*3+2, c2);
+-        }
++        /*
++         * A saved value that is not three numbers would leave the
++         * colour unset, and the first conf_get_int_int on it (saving,
++         * or setting up the palette) would fail an assertion; use the
++         * default instead.
++         */
++        if (sscanf(buf2, "%d,%d,%d", &c0, &c1, &c2) != 3)
++            sscanf(defaults[i], "%d,%d,%d", &c0, &c1, &c2);
++        conf_set_int_int(conf, CONF_colours, i*3+0, c0);
++        conf_set_int_int(conf, CONF_colours, i*3+1, c1);
++        conf_set_int_int(conf, CONF_colours, i*3+2, c2);
+         sfree(buf2);
+     }
+     for (i = 0; i < 256; i += 32) {

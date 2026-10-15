@@ -817,6 +817,119 @@ static void test_proxies(void)
     close(lfd);
 }
 
+/* ---------- Local commands (M13) ---------- */
+
+static char workdir[600];
+
+static bool read_file(const char *name, char *buf, size_t size)
+{
+    char path[700];
+    snprintf(path, sizeof(path), "%s/%s", workdir, name);
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return false;
+    size_t n = fread(buf, 1, size - 1, f);
+    buf[n] = 0;
+    fclose(f);
+    return true;
+}
+
+/* The process whose pid the command wrote to `name` has been reaped:
+ * not even a zombie is left. */
+static bool reaped(const char *name)
+{
+    char buf[32];
+    if (!read_file(name, buf, sizeof(buf)))
+        return false;
+    pid_t pid = (pid_t)atoi(buf);
+    if (pid <= 0)
+        return false;
+    double deadline = now_seconds() + 10;
+    while (now_seconds() < deadline) {
+        if (kill(pid, 0) < 0 && errno == ESRCH)
+            return true;
+        usleep(10000);
+    }
+    return false;
+}
+
+static void test_preconnect(void)
+{
+    int tport, tfd = listen_loopback(&tport);
+    char tportstr[16], cmd[2048];
+    snprintf(tportstr, sizeof(tportstr), "%d", tport);
+
+    /* The command runs to completion before the connection is made; its
+     * exit status is logged; it does not inherit this process's
+     * descriptors (fd 200, a copy of the listening socket, is not
+     * close-on-exec); and it is reaped. */
+    CHECK(dup2(tfd, 200) == 200);
+    snprintf(cmd, sizeof(cmd),
+             "echo $$ > '%s/pre.pid'; "
+             "if [ -e /dev/fd/200 ]; then echo inherited; else echo closed; fi > '%s/pre.fds'; "
+             "echo %%host:%%port > '%s/pre.ran'; exit 3",
+             workdir, workdir, workdir);
+    const char *const pairs[] = { "Protocol", "raw", "HostName", "127.0.0.1",
+                                  "PortNumber", tportstr,
+                                  "PreConnectCommand", cmd, NULL };
+    open_session(pairs, NULL);
+    peer t = { .fd = accept_within(tfd, 10) };
+    CHECK(t.fd >= 0);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "127.0.0.1:%d\n", tport);
+    char ran[256] = "";
+    CHECK(read_file("pre.ran", ran, sizeof(ran)) && !strcmp(ran, buf));
+    CHECK(wait_log("Running pre-connect command: echo $$", 10));
+    CHECK(wait_log("Pre-connect command exited with status 3", 10));
+    CHECK(wait_rec(is_connected, 10));
+    PEER_SEND(&t, "after the command\r\n");
+    CHECK(wait_screen("after the command", 10));
+    char fds[64] = "";
+    CHECK(read_file("pre.fds", fds, sizeof(fds)) && !strcmp(fds, "closed\n"));
+    close(200);
+    CHECK(reaped("pre.pid"));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    close(t.fd);
+
+    /* %user and %pass are refused (the command does not run), and the
+     * session keeps its proxy credentials for the proxy (patch 0014:
+     * before, %pass expanded to the password, in the Event Log too, and
+     * the SOCKS 5 proxy got empty credentials). */
+    int pport, pfd = listen_loopback(&pport);
+    snprintf(cmd, sizeof(cmd), "echo %%user:%%pass > '%s/leak'", workdir);
+    const char *const creds[] = { "ProxyUsername", "user", "ProxyPassword", "s3cretpw",
+                                  "PreConnectCommand", cmd, NULL };
+    peer p = proxied_session(pfd, pport, "2", creds);
+    CHECK(PEER_EXPECT(&p, "\x05\x03\x00\x03\x02"));
+    PEER_SEND(&p, "\x05\x02");
+    CHECK(PEER_EXPECT(&p, "\x01\x04user\x08s3cretpw"));
+    PEER_SEND(&p, "\x01\x00");
+    CHECK(PEER_EXPECT(&p, "\x05\x01\x00\x03\x0e" "target.invalid" "\x10\xe1"));
+    PEER_SEND(&p, "\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
+    CHECK(wait_log("Pre-connect command: references to %user or %pass not supported", 10));
+    check_tunnel(&p);
+    CHECK(!read_file("leak", buf, sizeof(buf)));
+    CHECK(!log_has("s3cretpw"));
+
+    /* A local proxy command is reaped when its connection closes (it
+     * was left a zombie before patch 0015). */
+    snprintf(cmd, sizeof(cmd), "echo $$ > '%s/proxy.pid'; echo proxied; cat", workdir);
+    const char *const local[] = { "Protocol", "raw", "HostName", "target.invalid",
+                                  "PortNumber", "4321", "ProxyMethod", "5",
+                                  "ProxyTelnetCommand", cmd, NULL };
+    open_session(local, NULL);
+    CHECK(wait_screen("proxied", 10));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    CHECK(reaped("proxy.pid"));
+
+    close(pfd);
+    close(tfd);
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -840,6 +953,8 @@ int main(void)
     test_supdup();
     test_serial();
     test_proxies();
+    snprintf(workdir, sizeof(workdir), "%s", base);
+    test_preconnect();
 
     CHECK(spb_core_barrier());
     CHECK(spb_debug_live_sessions() == 0);
