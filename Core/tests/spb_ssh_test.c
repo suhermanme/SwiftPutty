@@ -1256,6 +1256,150 @@ static void test_environment(fixture *f)
     release_session();
 }
 
+/* M13: a real Kerberos login (D-044). A Docker container runs an MIT KDC
+ * for SWIFTPUTTY.TEST and an OpenSSH server with GSSAPI authentication
+ * and key exchange (Core/tests/fixtures/kerberos). The test gets a ticket
+ * with macOS's kinit into a credential cache of its own, under a
+ * krb5.conf of its own (KRB5CCNAME, KRB5_CONFIG), then:
+ *   1. GSSAPI key exchange and authentication: logged in, no password;
+ *   2. GSSAPI authentication only (key exchange off): the same;
+ *   3. no ticket: GSSAPI fails and the password is asked for.
+ * Skipped, and says so, when Docker is not running. */
+static bool has_prompt_or_connected(void)
+{
+    return rec.prompts > 0 || rec.state == SPB_SESSION_CONNECTED ||
+           rec.state == SPB_SESSION_FAILED;
+}
+
+static bool log_has(const char *needle)
+{
+    pthread_mutex_lock(&rec.lock);
+    bool found = strstr(rec.event_log, needle) != NULL;
+    pthread_mutex_unlock(&rec.lock);
+    return found;
+}
+
+static void kerberos_login(int port, bool kex, bool expect_gssapi)
+{
+    char portstr[16];
+    snprintf(portstr, sizeof(portstr), "%d", port);
+    /* By name: the service ticket is for host/localhost. */
+    const char *const gss[] = { "HostName", "localhost", "AuthGSSAPI", "1",
+                                "AuthGSSAPIKEX", kex ? "1" : "0", NULL };
+    open_session_with(port, "tester", false, gss);
+    /* Host key dialog for the first connection without key exchange. */
+    CHECK(wait_rec(has_prompt_or_connected, 30) ||
+          wait_screen("password:", 1));
+    pthread_mutex_lock(&rec.lock);
+    bool prompted = rec.prompts > 0;
+    pthread_mutex_unlock(&rec.lock);
+    if (prompted)
+        answer(SPB_ANSWER_ACCEPT_AND_STORE);
+    if (expect_gssapi) {
+        CHECK(wait_rec(is_connected, 30));
+        CHECK(strstr(screen_text(), "password:") == NULL);
+        if (kex) {
+            CHECK(log_has("Doing GSSAPI (with Kerberos V5)"));
+            CHECK(log_has("GSSAPI Key Exchange complete!"));
+            CHECK(log_has("Trying gssapi-keyex..."));
+        } else {
+            CHECK(!log_has("GSSAPI Key Exchange complete!"));
+            CHECK(log_has("GSSAPI authentication loop finished OK"));
+        }
+    } else {
+        CHECK(wait_screen("tester@localhost's password:", 30));
+        type("weasel\r");
+        CHECK(wait_rec(is_connected, 20));
+        CHECK(!log_has("GSSAPI authentication loop finished OK"));
+    }
+    type("echo krb-$(id -un)\r");
+    CHECK(wait_screen("krb-tester\n", 20));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    if (!expect_gssapi || getenv("SPB_KRB_VERBOSE")) {
+        pthread_mutex_lock(&rec.lock);
+        if (getenv("SPB_KRB_VERBOSE"))
+            fprintf(stderr, "%s", rec.event_log);
+        pthread_mutex_unlock(&rec.lock);
+    }
+    release_session();
+}
+
+/* The fixture is started, and KRB5_CONFIG / KRB5CCNAME set, before
+ * anything in the process uses GSSAPI: Apple's Kerberos reads its
+ * configuration once, when it is first used. */
+static struct {
+    bool up;
+    char cid[128];
+    int ssh_port, kdc_port;
+    char conf[700], pw[700];
+} krb;
+
+static void kerberos_setup(void)
+{
+    char cmd[1200], line[256] = "";
+    snprintf(cmd, sizeof(cmd), "'%s/kerberos/fixture.sh' start", SPB_FIXTURES_DIR);
+    FILE *p = popen(cmd, "r");
+    bool got = p && fgets(line, sizeof(line), p);
+    int status = p ? pclose(p) : -1;
+    if (!got || status != 0) {
+        fprintf(stderr, "  Kerberos login test skipped: Docker is not "
+                "available (fixture status %d)\n", status);
+        return;
+    }
+    if (sscanf(line, "%127s %d %d", krb.cid, &krb.ssh_port, &krb.kdc_port) != 3) {
+        fprintf(stderr, "  Kerberos fixture said \"%s\"\n", line);
+        failures++;
+        return;
+    }
+    char cache[700];
+    snprintf(krb.conf, sizeof(krb.conf), "%s/krb5.conf", workdir);
+    snprintf(cache, sizeof(cache), "FILE:%s/krb5cc", workdir);
+    snprintf(krb.pw, sizeof(krb.pw), "%s/krb5pw", workdir);
+    FILE *f = fopen(krb.conf, "w");
+    fprintf(f, "[libdefaults]\n default_realm = SWIFTPUTTY.TEST\n"
+            " dns_lookup_realm = false\n dns_lookup_kdc = false\n"
+            " dns_canonicalize_hostname = false\n rdns = false\n"
+            "[realms]\n SWIFTPUTTY.TEST = {\n  kdc = tcp/127.0.0.1:%d\n }\n"
+            "[domain_realm]\n localhost = SWIFTPUTTY.TEST\n", krb.kdc_port);
+    fclose(f);
+    f = fopen(krb.pw, "w");
+    fputs("kerberos-pw\n", f);
+    fclose(f);
+    /* This process only: the developer's own Kerberos setup and
+     * tickets are never touched. */
+    setenv("KRB5_CONFIG", krb.conf, 1);
+    setenv("KRB5CCNAME", cache, 1);
+    krb.up = true;
+}
+
+static void test_kerberos(void)
+{
+    if (!krb.up)
+        return;
+    char cmd[1200];
+    snprintf(cmd, sizeof(cmd),
+             "kinit --password-file='%s' tester@SWIFTPUTTY.TEST", krb.pw);
+    CHECK(system(cmd) == 0);
+
+    kerberos_login(krb.ssh_port, true, true);
+    kerberos_login(krb.ssh_port, false, true);
+    CHECK(system("kdestroy >/dev/null 2>&1") == 0);
+    kerberos_login(krb.ssh_port, false, false);
+}
+
+static void kerberos_teardown(void)
+{
+    if (!krb.up)
+        return;
+    unlink(krb.pw);
+    char cmd[1200];
+    snprintf(cmd, sizeof(cmd), "'%s/kerberos/fixture.sh' stop %s",
+             SPB_FIXTURES_DIR, krb.cid);
+    if (system(cmd) != 0)
+        fprintf(stderr, "  could not stop container %s\n", krb.cid);
+}
+
 /* M13: with GSSAPI on (PuTTY's defaults) and macOS's libraries now
  * loaded (patch 0021), a login to a server without GSSAPI still works
  * and is not held up by Kerberos. Timed against GSSAPI off. */
@@ -1666,6 +1810,7 @@ int main(void)
     snprintf(state_dir, sizeof(state_dir), "%s/state", base);
     snprintf(workdir, sizeof(workdir), "%s", base);
     signal(SIGPIPE, SIG_IGN);
+    kerberos_setup();
 
     char *err = NULL;
     spb_core_options opts = { .state_dir = state_dir };
@@ -1692,6 +1837,8 @@ int main(void)
     test_accept_once_and_cancel();
     test_changed_host_key(&server);
     test_public_key_auth();
+    test_kerberos();
+    kerberos_teardown();
 
     CHECK(spb_core_barrier());
     CHECK(spb_debug_live_sessions() == 0);

@@ -1,0 +1,11 @@
+# Included by Debian's /etc/ssh/sshd_config (sshd_config.d/*.conf).
+GSSAPIAuthentication yes
+GSSAPIKeyExchange yes
+GSSAPICleanupCredentials yes
+# The client asks for host/localhost; the container's hostname differs.
+GSSAPIStrictAcceptorCheck no
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication no
+UsePAM no
+LogLevel DEBUG1

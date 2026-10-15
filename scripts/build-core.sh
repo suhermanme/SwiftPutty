@@ -92,11 +92,13 @@ if [[ $RUN_TESTS == 1 ]]; then
     for test in spb_bridge_test spb_session_test spb_terminal_test \
                 spb_ssh_test spb_backends_test; do
         section "$test under leaks --atExit ($HOST_ARCH)"
-        # Apple's Heimdal leaks inside krb5_get_credentials when GSSAPI
-        # key exchange tries a Kerberos credential the Mac holds (e.g.
-        # its local KDC's); not ours, so excluded (D-043). leaks still
-        # counts excluded blocks in its total: every leak must be one.
+        # Apple's Heimdal leaks inside krb5_get_credentials (a Kerberos
+        # credential the Mac holds, e.g. its local KDC's) and
+        # _krb5_build_authenticator (every GSSAPI context it builds);
+        # not ours, so excluded (D-043, D-044). leaks still counts
+        # excluded blocks in its total: every leak must be one.
         out="$(MallocStackLogging=1 leaks --atExit --exclude krb5_get_credentials \
+               --exclude _krb5_build_authenticator \
                -- "$BUILD/core-$HOST_ARCH/$test" 2>/dev/null)" || true
         total="$(sed -nE 's/^Process [0-9]+: ([0-9]+) leaks.*/\1/p' <<<"$out")"
         excluded="$(sed -nE 's/^([0-9]+) leaks? excluded.*/\1/p' <<<"$out")"

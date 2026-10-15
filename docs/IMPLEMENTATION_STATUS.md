@@ -62,7 +62,10 @@ signature), reliability stress tests, and GSSAPI on macOS.
   sessions directory.
 - **GSSAPI on macOS** (D-043, patch 0021): `GSS.framework` and
   `libgssapi_krb5.dylib` load with every function bound; logins with
-  GSSAPI on are not delayed.
+  GSSAPI on are not delayed. **Tested end to end** (D-044) against a
+  Kerberos realm in Docker: GSSAPI key exchange, GSSAPI authentication,
+  and the password fallback without a ticket; found patch 0023 (each
+  GSSAPI login leaked its MIC).
 
 **Tests and results**
 
@@ -71,9 +74,9 @@ Swift 6.4 / CMake 4.4.3.
 
 | Check | Result |
 |---|---|
-| Core build, arm64 + x86_64 (RelWithDebInfo), patches 0001–0022 | PASS |
-| C tests (8 programs, including `spb_fuzz_terminal` and `spb_fuzz_parsers`); new: pre-connect command and reaping, logs without passwords, short Ed25519 key, GSSAPI libraries and timing, reset mid-transfer, SIGPIPE from a local command, descriptor exhaustion, busy shutdown | PASS |
-| `leaks --atExit`: the five C test programs | PASS (0 leaks of ours; 18 in Apple's Heimdal `krb5_get_credentials` excluded in `spb_ssh_test`, D-043) |
+| Core build, arm64 + x86_64 (RelWithDebInfo), patches 0001–0023 | PASS |
+| C tests (8 programs, including `spb_fuzz_terminal` and `spb_fuzz_parsers`); new: pre-connect command and reaping, logs without passwords, short Ed25519 key, GSSAPI libraries and timing, Kerberos logins (Docker), reset mid-transfer, SIGPIPE from a local command, descriptor exhaustion, busy shutdown | PASS |
+| `leaks --atExit`: the five C test programs | PASS (0 leaks of ours; Apple's Heimdal `krb5_get_credentials` / `_krb5_build_authenticator` excluded in `spb_ssh_test`, D-043/D-044) |
 | C tests under ASan + UBSan / TSan (Debug) | PASS |
 | Longer fuzzing by hand: 550,000 parser inputs (100,000 under ASan+UBSan), 9,000 terminal inputs under ASan+UBSan | PASS after patches 0016–0020 |
 | `swift test` (122 tests, 27 suites; new: keychain and secret store, mutated and unwritable sessions files) | PASS |
@@ -83,13 +86,13 @@ Swift 6.4 / CMake 4.4.3.
 
 **Limitations / not done**
 
-- A GSSAPI login is not tested (needs a Kerberos realm and a server
-  keytab); GSSAPI and X11 rows stay PARTIAL.
+- The Kerberos test needs Docker: CI's macOS runners skip it. GSSAPI
+  delegation on the server side is not tested. X11 rows stay PARTIAL.
 - The fuzzing driver is not coverage-guided; a libFuzzer campaign with
   an LLVM toolchain (`-DSPB_LIBFUZZER=ON`) is left for M17.
 - Developer builds are ad-hoc signed, so macOS may ask once per rebuild
   before the app reads its keychain items (D-040; M15 signs properly).
-- Patches 0010–0022 are not yet reported upstream. **0017 should be
+- Patches 0010–0023 are not yet reported upstream. **0017 should be
   reported privately** (a server can abort the client).
 - From reading `unix/network.c` (not tested): a forwarding listener whose
   `accept()` fails while descriptors are exhausted stays readable, so

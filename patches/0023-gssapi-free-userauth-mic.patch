@@ -1,0 +1,22 @@
+SwiftPutty local patch 0023
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+GSSAPI authentication: free the MIC once it is in the packet.
+
+ssh2_userauth_gss_packet() gets a MIC from the GSSAPI library with
+get_mic(), copies it into the outgoing packet, and never released it
+with free_mic(), so each gssapi-with-mic or gssapi-keyex login leaked
+the library's buffer. Found by `leaks --atExit` on
+Core/tests/spb_ssh_test.c logging in to a Kerberos test realm.
+
+--- a/ssh/userauth2-client.c
++++ b/ssh/userauth2-client.c
+@@ -2575,6 +2575,7 @@
+         put_stringz(p, authtype);
+     }
+     put_string(p, mic.value, mic.length);
++    s->shgss->lib->free_mic(s->shgss->lib, &mic);
+ 
+     return p;
+ }

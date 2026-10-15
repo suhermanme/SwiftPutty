@@ -232,7 +232,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Kex algorithm order (`CONF_ssh_kexlist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | future | Shown mid-session (SSH-2); used at the next rekey. Used at the next key exchange |
-| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | PARTIAL | future | M13 (D-043, patch 0021): macOS's `GSS.framework` and `libgssapi_krb5.dylib` load with every function bound (`spb_bridge_test`); logins with GSSAPI on are not delayed. A GSSAPI login is not tested (needs a Kerberos realm and server keytab) |
+| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | COMPLETE | future | M13 (D-043, D-044, patches 0021, 0023): macOS's `GSS.framework` and `libgssapi_krb5.dylib`; a login by GSSAPI key exchange to a Kerberos test realm (Docker) in `spb_ssh_test` |
 | Max minutes before rekey (`CONF_ssh_rekey_time`) | Number field | COMPLETE | runtime | May rekey immediately if shortened |
 | Minutes between GSS checks (`CONF_gssapirekey`) | Number field | COMPLETE | runtime | |
 | Max data before rekey (`CONF_ssh_rekey_data`) | Text field (e.g. `1G`) | COMPLETE | runtime | |
@@ -258,9 +258,9 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Private key file (`CONF_keyfile`) | Edit box + Browse… (NSOpenPanel) | COMPLETE | reconnect | PPK + OpenSSH formats via upstream. PPK files (upstream; OpenSSH keys must be converted with puttygen, as in PuTTY). Unencrypted and passphrase-protected keys tested against uppity (M09); the passphrase is asked in the terminal |
 | Certificate (`CONF_detached_cert`) | Edit box + Browse… | COMPLETE | reconnect | |
 | Authentication plugin (`CONF_auth_plugin`) | Edit box | COMPLETE | reconnect | Runs a local command: reviewed in M13 (D-041), started and reaped as every local command (patch 0015) |
-| Attempt GSSAPI auth (`CONF_try_gssapi_auth`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
-| Allow GSSAPI delegation (`CONF_gssapifwd`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
-| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list (GSS.framework, libgssapi_krb5, libgss, user-supplied) + path with Browse… | PARTIAL | reconnect | macOS names for upstream's keywords (patch 0021). See GSSAPI key exchange |
+| Attempt GSSAPI auth (`CONF_try_gssapi_auth`) | Checkbox | COMPLETE | reconnect | M13: login by `gssapi-with-mic`, and the password fallback without a ticket, against the Kerberos test realm |
+| Allow GSSAPI delegation (`CONF_gssapifwd`) | Checkbox | PARTIAL | reconnect | Passed to PuTTY; delegation on the server side not tested (D-044) |
+| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list (GSS.framework, libgssapi_krb5, libgss, user-supplied) + path with Browse… | COMPLETE | reconnect | macOS names for upstream's keywords (patch 0021). See GSSAPI key exchange |
 
 ## Connection → SSH → TTY / X11 / Tunnels / Bugs
 

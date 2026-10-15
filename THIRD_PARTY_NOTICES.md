@@ -62,6 +62,8 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     libraries.
   - `0022-fd-socket-no-sigpipe.patch`: writing to a local command that has
     exited reports an error instead of raising SIGPIPE.
+  - `0023-gssapi-free-userauth-mic.patch`: free the GSSAPI MIC after a
+    login uses it.
   - At link time, `unix/utils/subprocess_waiter.c` is replaced by
     SwiftPutty's own waiter, which installs no signal handler.
   - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as

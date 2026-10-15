@@ -915,3 +915,30 @@ On a Mac holding a Kerberos credential (such as its local KDC's), Apple's
 Heimdal leaks a few principals inside `krb5_get_credentials` when the
 key exchange tries it; the `leaks` pass excludes allocations under that
 function and still requires every leak found to be one of them.
+
+## D-044 — A Kerberos realm in Docker for the GSSAPI login test
+
+**Status:** Accepted (M13)
+**Context:** D-043 made GSSAPI load on macOS but could not test a login:
+that needs a KDC and an SSH server with a host keytab. Options were a
+Docker container, a Linux VM, or a KDC and `sshd` run natively.
+**Decision:** `Core/tests/fixtures/kerberos/` builds a Debian image with
+an MIT KDC (realm `SWIFTPUTTY.TEST`, user `tester`, `host/localhost` in
+the keytab) and OpenSSH with GSSAPI authentication and Debian's GSSAPI
+key exchange. `fixture.sh start` runs it with the KDC and SSH ports on
+127.0.0.1. `spb_ssh_test` starts it before anything in the process uses
+GSSAPI (Apple's Kerberos reads its configuration once), points
+`KRB5_CONFIG` and `KRB5CCNAME` at files of its own, gets a ticket with
+macOS's `kinit`, and logs in by GSSAPI key exchange, by GSSAPI
+authentication, and with no ticket (password fallback). Without Docker
+the test says it is skipped and the rest runs.
+**Consequences:** The GSSAPI path is tested end to end against MIT
+Kerberos and OpenSSH, with Apple's GSS.framework on the client. It found
+patch 0023 (each GSSAPI login leaked its MIC). Apple's Heimdal leaks one
+authenticator per context it builds; the `leaks` pass excludes
+`_krb5_build_authenticator` too. GitHub's macOS runners have no Docker,
+so CI skips it; it runs on developer Macs with Docker Desktop. The
+developer's own Kerberos configuration and tickets are never used. Not
+covered: credential delegation (`GssapiFwd`) on the server side, other
+realms or KDCs (Active Directory), a manual check against a real
+deployment.

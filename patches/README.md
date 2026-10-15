@@ -36,3 +36,4 @@ Each patch:
 | `0020-clipme-combining-chars-use-base-style.patch` | Copying a combining character read the never-written attributes and colour of its spare cell | Not yet reported; suitable for upstream (undefined behaviour) |
 | `0021-gss-macos-library-names.patch` | The GSSAPI loader looked only for `.so` libraries; on macOS it now loads `GSS.framework` and `libgssapi_krb5.dylib` | Not yet reported; could be offered (macOS support) |
 | `0022-fd-socket-no-sigpipe.patch` | Writing to a local command that had exited raised SIGPIPE and ended the whole process | Not yet reported; suitable for upstream |
+| `0023-gssapi-free-userauth-mic.patch` | Each GSSAPI login leaked the MIC buffer from `get_mic()` | Not yet reported; suitable for upstream |
