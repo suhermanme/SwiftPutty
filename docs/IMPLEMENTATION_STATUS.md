@@ -44,6 +44,26 @@
   window asks "SwiftPutty Exit Confirmation" (Yes / No); ⌘Q asks once
   for all such windows.
 - `scripts/build-app.sh Debug` fixed (empty array under `set -u`).
+- **Clicked through by hand** (Debug app against uppity, driven with
+  System Events and real mouse events; screenshots checked): the
+  Session menu in GTK's order, Restart disabled while connected;
+  Special Commands with "More signals" and separators, and "Repeat key
+  exchange" logged "at user request"; the Event Log window (timestamps,
+  Shift-click selection, ⌘A / ⌘C give "time<TAB>event" lines, Close);
+  ⌘W on a connected window asks, No keeps it and Yes closes it;
+  Duplicate Session opens a second connection; after `exit 5` the
+  window is "(inactive)", Restart is enabled and Special Commands
+  hidden, and Restart reconnects in the same window with the scrollback
+  kept; Clear Scrollback and Reset Terminal; Saved Sessions shows
+  "(No sessions)", updates as soon as a session is saved, and opens it;
+  ⌘Q asks once ("these 2 sessions"; one session: "this session"), No
+  keeps the app, Yes quits, and nothing is asked with nothing connected.
+- Found while clicking through, and fixed: in Debug builds the
+  `SWIFTPUTTY_DEBUG_OPEN_*` aid ran every time the configuration dialog
+  appeared, closing it mid-appearance; the reopened dialog then showed
+  typed values without storing them (a typed port was saved as 22). It
+  now runs once per launch. Release builds never had the aid. A test now
+  types into the real dialog through AppKit's field editor.
 
 **Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
 host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
@@ -54,15 +74,15 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
 | C tests (`spb_ssh_test` adds: specials list, user rekey, Clear Scrollback, Reset Terminal, close warning, Restart after close / remote exit / refused connection) | PASS |
 | `leaks --atExit`: all four C test programs | PASS (0 leaks) |
 | C tests under ASan + UBSan / TSan (Debug) | PASS |
-| `swift test` (100 tests, 20 suites; new: Event Log bounds and format, Special Commands tree and rekey, close warning, Restart, Clear Scrollback) | PASS |
+| `swift test` (101 tests, 21 suites; new: Event Log bounds and format, Special Commands tree and rekey, close warning, Restart, Clear Scrollback, typing host and port into the real dialog) | PASS |
 | `swift test --sanitize=address` / `--sanitize=thread` | PASS |
 | App Debug build; Release build, universal | PASS |
 
 **Limitations / not done**
 
-- New UI (Session menu, Event Log window, close confirmation, Saved
-  Sessions, Duplicate) not clicked through by hand; checked by build and
-  model-level tests. Saved Sessions and Duplicate have no automated test.
+- Saved Sessions and Duplicate Session are checked by hand only (no
+  automated test); a saved session with no destination opening the
+  configuration dialog was not tried.
 - The non-fatal error path is not exercised (upstream reaches it only
   through an SSH proxy connection).
 - No terminal context menu (GTK's Ctrl+right-click); the menu bar has

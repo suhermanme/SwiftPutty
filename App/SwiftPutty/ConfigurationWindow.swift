@@ -57,10 +57,16 @@ struct ConfigurationWindow: View {
     }
 
     #if DEBUG
+    @MainActor private static var openedDebugSessions = false
+
     /// Developer aid (debug builds only): SWIFTPUTTY_DEBUG_OPEN_RAW or
     /// SWIFTPUTTY_DEBUG_OPEN_SSH=[user@]host:port opens a session at
     /// launch from "Default Settings", for screenshots and manual checks.
+    /// Once per launch: opening closes this dialog, and doing that again
+    /// while a reopened dialog appears leaves it unable to update.
     private func openDebugSessions() {
+        guard !Self.openedDebugSessions else { return }
+        Self.openedDebugSessions = true
         let environment = ProcessInfo.processInfo.environment
         for (variable, type) in [("SWIFTPUTTY_DEBUG_OPEN_RAW", "raw"), ("SWIFTPUTTY_DEBUG_OPEN_SSH", "ssh")] {
             guard let target = environment[variable],

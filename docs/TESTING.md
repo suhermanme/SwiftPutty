@@ -3,7 +3,7 @@
 Status: **M10.** C bridge, core-thread/session, terminal and SSH tests
 against local servers, and Swift package tests (including pixel-level
 rendering, SSH through a real terminal view, the saved-session store and
-the configuration dialog's logic) exist.
+the configuration dialog's logic and, since M10, typing into it) exist.
 
 ## Running the tests
 
