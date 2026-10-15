@@ -138,9 +138,23 @@ Swift 6.4 / CMake 4.4.3.
     it leaves. (3) Escape in a font popover went to the dialog's Cancel
     (the popover is not the key window), closing the dialog or quitting
     the app; it now closes the popover only.
+- **Clicked through by hand** (2026-10-16): a password login through the
+  app's UI to a LAN server (Ubuntu, 192.168.3.0/24), host key dialog
+  (Connect Once), shell commands run. **Fixed:** a launch whose restored
+  windows were all session windows from an earlier launch (macOS keeps
+  windows on quit when "Close windows when quitting an application" is
+  off) closed them and so quit at once, without the configuration
+  dialog; a window restored from an earlier launch now opens the dialog
+  before it closes. Reproduced with the old build and checked with the
+  new one.
 
 **Limitations / not done**
 
+- macOS did not show the Local Network prompt for the Debug build: the
+  first LAN connection failed with "No route to host" until the user
+  allowed SwiftPutty in Privacy & Security > Local Network, and the
+  permission took effect only after the app was restarted. Likely the
+  ad-hoc signature (D-040); to check again with a signed build (M15).
 - Full screen from the green button or View menu stays unavailable
   while "always on top" is on (AppKit's rule for floating windows);
   Option-Return works.
@@ -706,8 +720,8 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
   focus, double-click in the list, the font popover, `NSSavePanel`, the
   Local Network prompt and opening a saved session against the LAN
   server through the window are not yet checked interactively.
-  (Since clicked through, except the Local Network prompt and the LAN
-  server: see M13.)
+  (Since clicked through, including a LAN server; the Local Network
+  prompt did not appear: see M13.)
 - Panels not yet present: Keyboard, Bell, Features, Translation,
   Selection, Colours (M06); Proxy, SSH and its subpanels, Serial, Telnet,
   Rlogin, SUPDUP (M09, M11, M12); the environment variables list and the
@@ -803,6 +817,8 @@ reported as exit status 7.
   UI against the LAN server were not exercised by hand (the machine was
   locked); the same path is covered against `uppity` by automated tests
   through a real window, and against the LAN server through the bridge.
+  (Since done: login through the UI against a LAN server, see M13; the
+  Local Network prompt did not appear for the Debug build.)
 - No warning before closing a connected session window (PuTTY's
   `WarnOnClose`): M10.
 

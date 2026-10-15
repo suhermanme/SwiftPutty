@@ -57,7 +57,7 @@ struct SessionWindow: View {
         if request.isFromThisLaunch {
             session
         } else {
-            Color.clear.onAppear { dismiss() }
+            ClosingWindow()
         }
     }
 

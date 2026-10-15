@@ -49,10 +49,20 @@ struct SwiftPuttyApp: App {
     }
 }
 
-/// Closes the window it is shown in.
-private struct ClosingWindow: View {
+/// Closes the window it is shown in: a window SwiftUI restored from an
+/// earlier launch. The configuration dialog opens first, so that a launch
+/// that restored only such windows shows the dialog, as PuTTY's does,
+/// instead of ending with its last window.
+struct ClosingWindow: View {
     @Environment(\.dismiss) private var dismiss
-    var body: some View { Color.clear.onAppear { dismiss() } }
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear.onAppear {
+            openWindow(id: WindowID.configuration)
+            dismiss()
+        }
+    }
 }
 
 /// The Event Log of the session window `window`; closes itself if that
