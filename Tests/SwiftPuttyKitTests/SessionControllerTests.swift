@@ -133,3 +133,20 @@ struct SessionControllerTests {
     }
 }
 }
+
+extension KitTests {
+    @Suite("Connection error hints")
+    struct ConnectionErrorHintTests {
+        /// "No route to host" gets the Local Network explanation where
+        /// macOS has Local Network privacy; other errors are left alone.
+        @Test func noRouteToHostExplainsLocalNetworkPrivacy() {
+            let failure = "Unable to open connection to\n192.168.3.243:\nNo route to host"
+            let message = ConnectionErrorHint.message(for: failure, localNetworkPrivacy: true)
+            #expect(message.hasPrefix(failure))
+            #expect(message.contains("Privacy & Security > Local Network"))
+            #expect(ConnectionErrorHint.message(for: failure, localNetworkPrivacy: false) == failure)
+            let refused = "Unable to open connection to\nexample.org:\nConnection refused"
+            #expect(ConnectionErrorHint.message(for: refused, localNetworkPrivacy: true) == refused)
+        }
+    }
+}

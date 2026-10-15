@@ -84,7 +84,7 @@ struct SessionWindow: View {
             .alert("SwiftPutty Fatal Error", isPresented: $showingError) {
                 Button("OK") {}
             } message: {
-                Text(controller.stateDetail ?? "The connection failed.")
+                Text(controller.stateDetail.map { ConnectionErrorHint.message(for: $0) } ?? "The connection failed.")
             }
             .background {
                 // A second sheet needs a view of its own.

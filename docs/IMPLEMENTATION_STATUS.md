@@ -153,8 +153,13 @@ Swift 6.4 / CMake 4.4.3.
 - macOS did not show the Local Network prompt for the Debug build: the
   first LAN connection failed with "No route to host" until the user
   allowed SwiftPutty in Privacy & Security > Local Network, and the
-  permission took effect only after the app was restarted. Likely the
-  ad-hoc signature (D-040); to check again with a signed build (M15).
+  permission took effect only after the app was restarted. A copy under
+  a new bundle ID got no prompt either (and no entry in the settings
+  list), so it is not an earlier answer; likely the ad-hoc signature
+  (D-040); to check again with a signed build (M15). Meanwhile "No route
+  to host" (what a blocked connection reports) now adds how to allow
+  SwiftPutty there (`ConnectionErrorHint`, macOS 15 and later); a host
+  that is down reports a timeout and gets no such hint.
 - Full screen from the green button or View menu stays unavailable
   while "always on top" is on (AppKit's rule for floating windows);
   Option-Return works.
