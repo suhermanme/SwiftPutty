@@ -12,7 +12,7 @@
 | **M07** | Live session reconfiguration framework | **COMPLETE** (2026-10-15) |
 | **M08** | SSH tunnels + live tunnel reconfiguration | **COMPLETE** (2026-10-15) |
 | **M09** | SSH authentication and connection parity | **COMPLETE** (2026-10-15) |
-| M10 | Event log and session operations | NOT STARTED |
+| **M10** | Event log and session operations | **COMPLETE** (2026-10-15) |
 | M11 | Additional PuTTY backends | NOT STARTED |
 | M12 | Configuration parity pass | NOT STARTED |
 | M13 | Security and reliability hardening | NOT STARTED |
@@ -20,6 +20,54 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M10 — Event log and session operations
+
+**Delivered**
+
+- **Bridge API v9** (D-034): Restart Session (after the connection
+  ends; logged, terminal reset, same window and scrollback), Special
+  Commands (the backend's list, reported as it changes; only listed
+  commands run), the close-warning query (upstream `close_warn_text`),
+  Clear Scrollback, Reset Terminal, and PuTTY's non-fatal errors as a
+  callback (the "SwiftPutty Error" box).
+- **Event Log window**, one per session, as GTK PuTTY's: the first 128
+  entries and the latest 128 with `..` at the gap, timestamped when
+  logged, multiple selection copied as "time<TAB>event" lines; it closes
+  with its session window.
+- **Session menu** in GTK PuTTY's order: Restart Session, Duplicate
+  Session (running settings), Saved Sessions (opens the session, or the
+  configuration dialog if it has no destination), Change Settings…,
+  Event Log, Special Commands (with submenus; hidden without a
+  connection), Clear Scrollback, Reset Terminal.
+- **Warn before closing window** (Behaviour panel): closing a connected
+  window asks "SwiftPutty Exit Confirmation" (Yes / No); ⌘Q asks once
+  for all such windows.
+- `scripts/build-app.sh Debug` fixed (empty array under `set -u`).
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | PASS |
+| C tests (`spb_ssh_test` adds: specials list, user rekey, Clear Scrollback, Reset Terminal, close warning, Restart after close / remote exit / refused connection) | PASS |
+| `leaks --atExit`: all four C test programs | PASS (0 leaks) |
+| C tests under ASan + UBSan / TSan (Debug) | PASS |
+| `swift test` (100 tests, 20 suites; new: Event Log bounds and format, Special Commands tree and rekey, close warning, Restart, Clear Scrollback) | PASS |
+| `swift test --sanitize=address` / `--sanitize=thread` | PASS |
+| App Debug build; Release build, universal | PASS |
+
+**Limitations / not done**
+
+- New UI (Session menu, Event Log window, close confirmation, Saved
+  Sessions, Duplicate) not clicked through by hand; checked by build and
+  model-level tests. Saved Sessions and Duplicate have no automated test.
+- The non-fatal error path is not exercised (upstream reaches it only
+  through an SSH proxy connection).
+- No terminal context menu (GTK's Ctrl+right-click); the menu bar has
+  every item.
+- `old_keyfile_warning` still goes to the unified log only.
 
 ## M09 — SSH authentication and connection parity
 

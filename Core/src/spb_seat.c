@@ -51,13 +51,24 @@ static void spb_seat_connection_fatal(Seat *seat, const char *message)
     spb_session_connection_fatal(seat_session(seat), message);
 }
 
-/* GTK PuTTY shows a message box; until the Event Log UI (M10) the text
- * goes to the session's event log. */
+/* unix/window.c gtk_seat_nonfatal: a message box, which the frontend
+ * shows; without one, the text goes to the session's event log. */
 static void spb_seat_nonfatal(Seat *seat, const char *message)
 {
+    spb_session *s = seat_session(seat);
+    if (s->cb.error_message) {
+        if (!atomic_load(&s->released))
+            s->cb.error_message(s->cb_ctx, message);
+        return;
+    }
     char *line = dupprintf("Error: %s", message);
-    spb_session_emit_event_log(seat_session(seat), line);
+    spb_session_emit_event_log(s, line);
     sfree(line);
+}
+
+static void spb_seat_update_specials_menu(Seat *seat)
+{
+    spb_session_update_specials(seat_session(seat));
 }
 
 /* ---------- Dialogs ---------- */
@@ -354,7 +365,7 @@ static const SeatVtable spb_seat_vt = {
     .notify_remote_disconnect = nullseat_notify_remote_disconnect,
     .connection_fatal = spb_seat_connection_fatal,
     .nonfatal = spb_seat_nonfatal,
-    .update_specials_menu = nullseat_update_specials_menu,
+    .update_specials_menu = spb_seat_update_specials_menu,
     .get_ttymode = spb_seat_get_ttymode,
     .set_busy_status = nullseat_set_busy_status,
     .confirm_ssh_host_key = spb_seat_confirm_ssh_host_key,

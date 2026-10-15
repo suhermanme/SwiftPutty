@@ -77,6 +77,51 @@ void spb_session_emit_output(spb_session *s, const void *data, size_t len,
         s->cb.output(s->cb_ctx, data, len, is_stderr);
 }
 
+/* unix/window.c gtk_seat_update_specials_menu: the list is the
+ * backend's, flattened for the frontend. The final SS_EXITMENU closes
+ * the top-level list and is not passed on. */
+void spb_session_update_specials(spb_session *s)
+{
+    const SessionSpecial *list = NULL;
+    if (s->backend && !s->exited)
+        list = backend_get_specials(s->backend);
+
+    size_t n = 0;
+    for (int depth = 1; list && depth > 0; n++) {
+        if (list[n].code == SS_SUBMENU)
+            depth++;
+        else if (list[n].code == SS_EXITMENU)
+            depth--;
+    }
+    if (n)
+        n--;                           /* the closing SS_EXITMENU */
+
+    sfree(s->specials);
+    s->specials = n ? snewn(n, SessionSpecial) : NULL;
+    s->n_specials = n;
+    spb_special *out = n ? snewn(n, spb_special) : NULL;
+    for (size_t i = 0; i < n; i++) {
+        s->specials[i] = list[i];
+        s->specials[i].name = NULL;    /* owned by the backend */
+        spb_special_kind kind;
+        switch (list[i].code) {
+          case SS_SEP:      kind = SPB_SPECIAL_SEPARATOR; break;
+          case SS_SUBMENU:  kind = SPB_SPECIAL_SUBMENU; break;
+          case SS_EXITMENU: kind = SPB_SPECIAL_END_SUBMENU; break;
+          default:          kind = SPB_SPECIAL_COMMAND; break;
+        }
+        out[i] = (spb_special){
+            .kind = kind,
+            .name = kind == SPB_SPECIAL_COMMAND || kind == SPB_SPECIAL_SUBMENU ?
+                list[i].name : NULL,
+            .code = list[i].code, .arg = list[i].arg,
+        };
+    }
+    if (callbacks_enabled(s) && s->cb.specials_changed)
+        s->cb.specials_changed(s->cb_ctx, out, n);
+    sfree(out);
+}
+
 static void emit_remote_exit(spb_session *s, int exit_code)
 {
     if (callbacks_enabled(s) && s->cb.remote_exit)
@@ -103,6 +148,8 @@ static void destroy_connection(spb_session *s)
     if (s->term)
         term_provide_backend(s->term, NULL);
     delete_callbacks_for_context(s);
+    if (s->n_specials)
+        spb_session_update_specials(s);  /* as GTK: the menu goes */
 }
 
 /* unix/window.c exit_callback */
@@ -155,13 +202,14 @@ static const char *unsupported_protocol_reason(int protocol)
     }
 }
 
-/* unix/window.c start_backend */
-static void cmd_start(void *vctx)
-{
-    spb_session *s = (spb_session *)vctx;
-    if (s->state != SPB_SESSION_CREATED)
-        return;
+typedef struct input_special {
+    spb_session *s;
+    int32_t code, arg;
+} input_special;
 
+/* unix/window.c start_backend */
+static void start_backend(spb_session *s)
+{
     int protocol = conf_get_int(s->conf, CONF_protocol);
     const char *reason = unsupported_protocol_reason(protocol);
     const BackendVtable *vt = backend_vt_from_proto(protocol);
@@ -205,6 +253,68 @@ static void cmd_start(void *vctx)
     term_provide_backend(s->term, s->backend);
     s->ldisc = ldisc_create(s->conf, s->term, s->backend, &s->seat);
     active_add(s);
+    spb_session_update_specials(s);
+}
+
+static void cmd_start(void *vctx)
+{
+    spb_session *s = (spb_session *)vctx;
+    if (s->state == SPB_SESSION_CREATED)
+        start_backend(s);
+}
+
+/* unix/window.c restart_session_menuitem, which GTK PuTTY enables once
+ * the connection is gone. */
+static void cmd_restart(void *vctx)
+{
+    spb_session *s = (spb_session *)vctx;
+    if (!spb_session_state_is_final(s->state))
+        return;
+    /* A fatal error drops the connection from a callback that may not
+     * have run yet. */
+    destroy_connection(s);
+    logevent(s->logctx, "----- Session restarted -----");
+    term_pwron(s->term, false);
+    s->exited = false;
+    s->state = SPB_SESSION_CREATED;    /* not reported: CONNECTING follows */
+    start_backend(s);
+}
+
+/* unix/window.c special_menuitem */
+static void cmd_special(void *vctx)
+{
+    input_special *cmd = vctx;
+    spb_session *s = cmd->s;
+    bool listed = false;
+    for (size_t i = 0; i < s->n_specials && !listed; i++)
+        listed = (int32_t)s->specials[i].code == cmd->code &&
+            s->specials[i].arg == cmd->arg &&
+            cmd->code != SS_SEP && cmd->code != SS_SUBMENU &&
+            cmd->code != SS_EXITMENU;
+    if (listed && s->backend && !s->exited)
+        backend_special(s->backend, (SessionSpecialCode)cmd->code, cmd->arg);
+    sfree(cmd);
+}
+
+typedef struct close_warning_cmd {
+    spb_session *s;
+    uint64_t request;
+} close_warning_cmd;
+
+/* unix/window.c delete_window: there is something to warn about while
+ * the connection has not exited. */
+static void cmd_close_warning(void *vctx)
+{
+    close_warning_cmd *cmd = vctx;
+    spb_session *s = cmd->s;
+    bool connected = !s->exited && !spb_session_state_is_final(s->state);
+    char *text = NULL;
+    if (connected && s->backend && s->backend->vt->close_warn_text)
+        text = s->backend->vt->close_warn_text(s->backend);
+    if (callbacks_enabled(s) && s->cb.close_warning)
+        s->cb.close_warning(s->cb_ctx, cmd->request, connected, text);
+    sfree(text);
+    sfree(cmd);
 }
 
 /*
@@ -385,6 +495,7 @@ static void cmd_release(void *vctx)
     spb_terminal_free(s);
     spb_seat_cancel_log_prompt(s);
     log_free(s->logctx);
+    sfree(s->specials);
     conf_free(s->conf);
     spb_settings_free(s->created_settings);
     spb_screen_free(s->screen);
@@ -481,6 +592,28 @@ void spb_session_send_eof(spb_session *s)
 void spb_session_close(spb_session *s)
 {
     post(s, cmd_close, s);
+}
+
+void spb_session_restart(spb_session *s)
+{
+    post(s, cmd_restart, s);
+}
+
+void spb_session_special(spb_session *s, int32_t code, int32_t arg)
+{
+    input_special *cmd = snew(input_special);
+    cmd->s = s;
+    cmd->code = code;
+    cmd->arg = arg;
+    post(s, cmd_special, cmd);
+}
+
+void spb_session_query_close_warning(spb_session *s, uint64_t request)
+{
+    close_warning_cmd *cmd = snew(close_warning_cmd);
+    cmd->s = s;
+    cmd->request = request;
+    post(s, cmd_close_warning, cmd);
 }
 
 void spb_session_release(spb_session *s)

@@ -345,6 +345,7 @@ struct BehaviourPanel: View {
                                      set: { model.setBool(.winNameAlways, !$0) }))
             }
             SettingsGroup(title: nil) {
+                CheckboxSetting(model: model, label: "Warn before closing window", keyword: .warnOnClose)
                 CheckboxSetting(model: model, label: "Ensure window is always on top", keyword: .alwaysOnTop)
                 CheckboxSetting(model: model, label: "Full screen on Option-Return",
                                 keyword: .fullScreenOnAltEnter)

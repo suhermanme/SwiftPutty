@@ -74,6 +74,11 @@ struct spb_session {
     struct spb_pending_prompt *prompt;
     struct spb_pending_prompt *log_prompt;
 
+    /* The Special Commands last reported (code and arg of each entry),
+     * which spb_session_special accepts. */
+    SessionSpecial *specials;
+    size_t n_specials;
+
     atomic_uint_fast64_t transport_id; /* bumped by each backend_init */
     spb_settings *created_settings;    /* as created; immutable, any thread */
 
@@ -94,6 +99,8 @@ void spb_session_emit_output(spb_session *s, const void *data, size_t len,
                              bool is_stderr);
 void spb_session_notify_remote_exit(spb_session *s);
 void spb_session_connection_fatal(spb_session *s, const char *message);
+/* Report the backend's Special Commands (none without a connection). */
+void spb_session_update_specials(spb_session *s);
 
 /* The Conf a reconfiguration installs: every saved keyword from
  * settings, unsaved keys from the running Conf (ARCHITECTURE 6.3). */

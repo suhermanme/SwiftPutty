@@ -113,7 +113,7 @@ struct SessionControllerTests {
         #expect(controller!.pendingPrompt == prompt)
         controller!.answer(prompt, with: .appendToLog)
         #expect(controller!.pendingPrompts.isEmpty)
-        #expect(await waitUntil { controller!.eventLog.contains { $0.hasPrefix("Appending session log") } })
+        #expect(await waitUntil { controller!.eventLog.contains { $0.text.hasPrefix("Appending session log") } })
 
         controller = nil                           // closes the log file
         #expect(await waitUntil { PuTTYCore.waitForPendingWork() && PuTTYCore.liveSessionCount == 0 })

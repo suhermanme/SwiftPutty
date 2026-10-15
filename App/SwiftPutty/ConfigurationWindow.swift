@@ -31,9 +31,20 @@ struct ConfigurationWindow: View {
                               onCancel: { dismissWindow(id: WindowID.configuration) },
                               onAbout: { openWindow(id: WindowID.about) })
         }
+        .onAppear(perform: loadRequestedSession)
+        .onChange(of: appModel.configurationToLoad) { loadRequestedSession() }
         #if DEBUG
         .task { openDebugSessions() }
         #endif
+    }
+
+    /// The Saved Sessions menu asked for a session with no destination:
+    /// load it, as `putty -load` shows the dialog with it.
+    private func loadRequestedSession() {
+        guard let name = appModel.configurationToLoad else { return }
+        appModel.configurationToLoad = nil
+        model.setSavedSessionName(name)
+        model.loadSelectedSession()
     }
 
     private func open(_ settings: PuTTYSettings) {

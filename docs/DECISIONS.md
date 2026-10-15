@@ -615,3 +615,41 @@ user keys made with upstream `puttygen` are committed (not secret).
 not usable on macOS as upstream stands (its Unix loader looks for `.so`
 names); agent, agent forwarding and X11 forwarding are configurable but
 not yet tested end to end.
+
+## D-034 — Session operations: GTK PuTTY's window menu; restart reuses the session
+
+**Status:** Accepted (M10)
+**Context:** GTK PuTTY's window menu (unix/window.c) offers Restart
+Session, Duplicate Session, Saved Sessions, Change Settings, Event Log,
+Special Commands, Clear Scrollback, Reset Terminal and the clipboard
+items; closing a connected window asks first ("Warn before closing
+window"). The bridge's states only moved forward, and SwiftUI has no
+hook to refuse a window close.
+**Decision:**
+- Bridge API v9: `spb_session_restart` (only once the connection has
+  ended: logs "----- Session restarted -----", `term_pwron(term, false)`,
+  connects again with the running Conf; states start again from
+  CONNECTING, and the transport id changes), `spb_session_special`
+  (accepted only for a command in the list last reported),
+  `spb_session_query_close_warning` (the backend's `close_warn_text`),
+  Clear Scrollback and Reset Terminal; callbacks `specials_changed` (the
+  seat's `update_specials_menu`, flattened; empty when the connection
+  goes), `error_message` (the seat's `nonfatal`, GTK's message box) and
+  `close_warning`.
+- The Event Log is kept as GTK's `logevent_dlg` keeps it (first 128
+  entries, then the latest 128 with `..` marking the gap), timestamped
+  when the core logs the line, and shown in one window per session that
+  closes with it; the selection copies as "time<TAB>event" lines.
+- The menu is the app's Session menu, in GTK's order. New Session stays
+  in File and the clipboard items in Edit. Duplicate Session uses the
+  running settings, as `launch_duplicate_session(inst->conf)` does.
+  Saved Sessions opens a session window directly, or the configuration
+  dialog when the session has no destination (`launch_saved_session`).
+- The window's delegate is wrapped by a forwarding proxy whose
+  `windowShouldClose` asks first (`WindowCloseGuard`). Yes closes the
+  window with `NSWindow.close()`, which does not ask again.
+- Quitting (⌘Q): PuTTY has no Quit, so the app asks once for all the
+  windows that would ask, with the same title and buttons.
+**Consequences:** A restarted window keeps its terminal, scrollback, Event
+Log and log file, as in GTK PuTTY. If SwiftUI ever replaces the window's
+delegate, the guard wraps it again on the next view update.

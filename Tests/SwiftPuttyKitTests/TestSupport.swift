@@ -63,7 +63,7 @@ final class EventCollector: @unchecked Sendable {
     }
 
     var eventLog: [String] {
-        events.compactMap { if case .eventLog(let line) = $0 { line } else { nil } }
+        events.compactMap { if case .eventLog(let line, _) = $0 { line } else { nil } }
     }
 
     /// Waits until `condition` holds; false on timeout.

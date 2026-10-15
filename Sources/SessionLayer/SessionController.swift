@@ -78,7 +78,13 @@ public final class SessionController {
     /// Why the session reached its current state, if known (for example
     /// the error that made it fail).
     public private(set) var stateDetail: String?
-    public private(set) var eventLog: [String] = []
+    /// PuTTY's Event Log, bounded as PuTTY's window keeps it.
+    public private(set) var eventLog = EventLog()
+    /// The connection's Special Commands (empty without a connection;
+    /// PuTTY then hides the menu).
+    public private(set) var specials: [SessionSpecial] = []
+    /// Non-fatal errors to show in a message box, oldest first.
+    public private(set) var errorMessages: [String] = []
     /// The most recent received output (at most ``transcriptLimit``
     /// bytes), stdout and stderr interleaved as received.
     public private(set) var transcript = Data()
@@ -107,6 +113,7 @@ public final class SessionController {
     @ObservationIgnored private var nextRequest: UInt64 = 1
     @ObservationIgnored private var exportWaiters: [UInt64: CheckedContinuation<RunningSettings?, Never>] = [:]
     @ObservationIgnored private var reconfigureWaiters: [UInt64: CheckedContinuation<String?, Never>] = [:]
+    @ObservationIgnored private var closeWarningWaiters: [UInt64: CheckedContinuation<CloseWarning?, Never>] = [:]
 
     public init(settings: PuTTYSettings) {
         self.settings = settings
@@ -149,6 +156,66 @@ public final class SessionController {
 
     public func sendEOF() {
         session?.sendEOF()
+    }
+
+    // MARK: Session operations (M10)
+
+    /// Whether Restart Session is available: the connection has ended.
+    public var canRestart: Bool { session != nil && state.isFinal }
+
+    /// Restart Session: connects again in the same window, with the
+    /// running settings. Only once the connection has ended.
+    public func restart() {
+        guard canRestart else { return }
+        session?.restart()
+    }
+
+    /// Runs a Special Commands entry.
+    public func runSpecial(_ command: SessionSpecialCommand) {
+        session?.special(command)
+    }
+
+    public func clearScrollback() {
+        session?.clearScrollback()
+    }
+
+    public func resetTerminal() {
+        session?.resetTerminal()
+    }
+
+    /// The oldest error message has been shown.
+    public func dismissErrorMessage() {
+        if !errorMessages.isEmpty { errorMessages.removeFirst() }
+    }
+
+    /// What closing the session's window would end.
+    public struct CloseWarning: Sendable, Equatable {
+        /// The connection's extra text (connection-sharing downstreams).
+        public var additionalText: String?
+
+        /// GTK PuTTY's warn-on-close message.
+        public var message: String {
+            "Are you sure you want to close this session?"
+                + (additionalText.map { "\n" + $0 } ?? "")
+        }
+    }
+
+    /// Whether closing needs asking first, without asking the core: a
+    /// connection that has not ended, with "Warn before closing window"
+    /// on. ``closeWarning()`` has the details.
+    public var mayNeedCloseWarning: Bool {
+        session != nil && !state.isFinal && settings["WarnOnClose"] != "0"
+    }
+
+    /// The warning to show before closing (GTK PuTTY's delete_window), or
+    /// nil if the window may close at once.
+    public func closeWarning() async -> CloseWarning? {
+        guard mayNeedCloseWarning, let session else { return nil }
+        let request = takeRequest()
+        return await withCheckedContinuation { continuation in
+            closeWarningWaiters[request] = continuation
+            session.queryCloseWarning(request: request)
+        }
     }
 
     // MARK: Change Settings (M07)
@@ -274,6 +341,8 @@ public final class SessionController {
         exportWaiters.removeAll()
         reconfigureWaiters.values.forEach { $0.resume(returning: "The session has ended") }
         reconfigureWaiters.removeAll()
+        closeWarningWaiters.values.forEach { $0.resume(returning: nil) }
+        closeWarningWaiters.removeAll()
     }
 
     private func takeRequest() -> UInt64 {
@@ -309,14 +378,17 @@ public final class SessionController {
     private func apply(_ event: PuTTYSessionEvent) {
         switch event {
         case .stateChanged(let newState, let detail):
+            if newState == .connecting && state.isFinal {
+                exitCode = nil                 // Restart Session
+            }
             state = newState
             if newState.isFinal { portForwardStatuses.removeAll() }
             stateDetail = detail
             let waiters = stateWaiters
             stateWaiters.removeAll()
             waiters.forEach { $0.resume() }
-        case .eventLog(let line):
-            eventLog.append(line)
+        case .eventLog(let line, let time):
+            eventLog.append(line, time: time)
         case .output(let data, _):
             receivedByteCount += data.count
             transcript.append(data)
@@ -348,6 +420,16 @@ public final class SessionController {
                 .resume(returning: RunningSettings(settings: exported, protocolInfo: info))
         case .reconfigured(let request, let error):
             reconfigureWaiters.removeValue(forKey: request)?.resume(returning: error)
+        case .specialsChanged(let list):
+            specials = list
+        case .errorMessage(let message):
+            errorMessages.append(message)
+        case .closeWarning(let request, let connected, let text):
+            // Asked again under the current settings: the option may
+            // have changed since.
+            let warning = connected && settings["WarnOnClose"] != "0"
+                ? CloseWarning(additionalText: text) : nil
+            closeWarningWaiters.removeValue(forKey: request)?.resume(returning: warning)
         case .portForwardStatus(let status):
             if status.state == .closed {
                 portForwardStatuses[status.forwarding] = nil

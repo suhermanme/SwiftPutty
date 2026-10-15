@@ -139,7 +139,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 |---|---|---|---|---|
 | Window title (`CONF_wintitle`) | Text field | COMPLETE | runtime | `term_pre_reconfig` pre-fills the live title. |
 | Separate window and icon titles (`CONF_win_name_always`) | Checkbox "Separate window and icon titles" (inverted): the minimised window shows the icon title | COMPLETE | runtime |  |
-| Warn before closing window (`CONF_warn_on_close`) | Checkbox (close confirmation sheet) | NOT STARTED | runtime | |
+| Warn before closing window (`CONF_warn_on_close`) | Checkbox; closing a connected window (close button, ⌘W) asks "SwiftPutty Exit Confirmation" with Yes / No, plus the backend's extra text (connection-sharing downstreams) | COMPLETE | runtime | M10 (D-034). ⌘Q asks once for every window that would ask. |
 | Window closes on ALT-F4 (`CONF_alt_f4`) | — | NOT APPLICABLE | unsupported | ⌘W is standard |
 | System menu on ALT-Space / ALT alone (`CONF_alt_space`, `CONF_alt_only`) | — | NOT APPLICABLE | unsupported | No system menu on macOS |
 | Ensure window is always on top (`CONF_alwaysontop`) | Checkbox (`NSWindow.level = .floating`) | COMPLETE | runtime |  |

@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 8
+#define SPB_API_VERSION 9
 
 /* ---------- Library information ---------- */
 
@@ -245,6 +245,24 @@ typedef struct spb_portfwd_status {
     const char *message;           /* error text, or NULL */
 } spb_portfwd_status;
 
+/* One entry of PuTTY's "Special Commands" menu (API v9), as the
+ * backend's get_specials lists it. A submenu is a SUBMENU entry (its
+ * name is the submenu's title), its entries, then END_SUBMENU. */
+typedef enum spb_special_kind {
+    SPB_SPECIAL_COMMAND,           /* name, code, arg: a menu item */
+    SPB_SPECIAL_SEPARATOR,
+    SPB_SPECIAL_SUBMENU,
+    SPB_SPECIAL_END_SUBMENU,
+} spb_special_kind;
+
+typedef struct spb_special {
+    spb_special_kind kind;
+    const char *name;              /* NULL for separators and ends */
+    /* Opaque PuTTY values (SessionSpecialCode and its argument), to pass
+     * back to spb_session_special. */
+    int32_t code, arg;
+} spb_special;
+
 typedef enum spb_session_state {
     SPB_SESSION_CREATED,      /* not started yet */
     SPB_SESSION_CONNECTING,   /* started; the backend is not ready for input */
@@ -260,8 +278,10 @@ typedef enum spb_session_state {
  * callback for the session has returned), so the caller frees ctx there.
  */
 typedef struct spb_session_callbacks {
-    /* detail: a human-readable reason, or NULL. Each state is reported at
-     * most once, in the order above; CLOSED and FAILED are final. */
+    /* detail: a human-readable reason, or NULL. States are reported in
+     * the order above, each at most once per connection; CLOSED and
+     * FAILED end it. Only spb_session_restart (API v9) starts a new
+     * connection, reported from CONNECTING again. */
     void (*state_changed)(void *ctx, spb_session_state state,
                           const char *detail);
     /* One line of PuTTY's Event Log. */
@@ -322,6 +342,24 @@ typedef struct spb_session_callbacks {
      * answers when the server replies. Nothing is reported when the
      * connection ends: every forwarding goes with it. */
     void (*portfwd_status)(void *ctx, const spb_portfwd_status *status);
+
+    /* --- Session operations (M10, API v9) --- */
+
+    /* The Special Commands menu changed (PuTTY's update_specials_menu):
+     * the backend's whole list, which is empty when there is no
+     * connection (GTK PuTTY then hides the menu). */
+    void (*specials_changed)(void *ctx, const spb_special *specials,
+                             size_t n_specials);
+    /* A non-fatal error PuTTY shows in a message box (seat nonfatal):
+     * GTK PuTTY's "PuTTY Error" box. Without this callback the text goes
+     * to the Event Log, prefixed with "Error: ". */
+    void (*error_message)(void *ctx, const char *message);
+    /* Answer to spb_session_query_close_warning: whether closing would
+     * end a connection, and the backend's extra warning text (upstream
+     * close_warn_text, e.g. "This will also close 2 downstream
+     * connections."), or NULL. */
+    void (*close_warning)(void *ctx, uint64_t request, bool connected,
+                          const char *text);
 } spb_session_callbacks;
 
 /*
@@ -386,6 +424,24 @@ uint64_t spb_session_transport_id(const spb_session *session);
 
 /* Disconnect without releasing: the session becomes CLOSED. */
 void spb_session_close(spb_session *session);
+
+/*
+ * Restart Session (unix/window.c restart_session_menuitem): only after
+ * the connection has ended (CLOSED or FAILED), otherwise ignored. Logs
+ * "----- Session restarted -----", resets the terminal (keeping its
+ * scrollback) and connects again with the running settings: the state
+ * goes back to CONNECTING, and spb_session_transport_id changes.
+ */
+void spb_session_restart(spb_session *session);
+
+/* Run a Special Commands entry (backend_special). Ignored unless code
+ * and arg are those of a COMMAND in the list last reported by
+ * specials_changed, and the connection still exists. */
+void spb_session_special(spb_session *session, int32_t code, int32_t arg);
+
+/* Ask what closing the window would end (GTK PuTTY's delete_window):
+ * answered by close_warning with the same request number. */
+void spb_session_query_close_warning(spb_session *session, uint64_t request);
 
 /*
  * Release the caller's handle. Returns at once; the connection (if any)
@@ -569,6 +625,11 @@ void spb_session_scroll(spb_session *session, spb_scroll_mode mode,
 /* Copy the whole scrollback and screen to the system clipboard (PuTTY's
  * "Copy All to Clipboard"). */
 void spb_session_copy_all(spb_session *session);
+
+/* "Clear Scrollback" (term_clrsb) and "Reset Terminal" (term_pwron, as
+ * GTK PuTTY's menu items; API v9). */
+void spb_session_clear_scrollback(spb_session *session);
+void spb_session_reset_terminal(spb_session *session);
 
 /* ---------- Diagnostics ---------- */
 

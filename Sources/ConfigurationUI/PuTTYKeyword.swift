@@ -140,6 +140,7 @@ public enum PuTTYKeyword: String, CaseIterable, Sendable {
     case userNameFromEnvironment = "UserNameFromEnvironment"
     case utf8Override = "UTF8Override"
     case utf8linedraw = "UTF8linedraw"
+    case warnOnClose = "WarnOnClose"
     case winNameAlways = "WinNameAlways"
     case winTitle = "WinTitle"
     case windowBorder = "WindowBorder"

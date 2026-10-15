@@ -32,17 +32,24 @@ struct SessionRequest: Codable, Hashable {
 /// One terminal window, as each PuTTY session has its own window.
 struct SessionWindow: View {
     let request: SessionRequest
-    let store: SavedSessionStore
+    let appModel: AppModel
+    private var store: SavedSessionStore { appModel.sessionStore }
     @State private var controller: SessionController
     @State private var showingError = false
     /// The open Change Settings dialog (GTK PuTTY's "Reconfiguration").
     @State private var reconfiguration: ConfigurationModel?
     @State private var reconfigurationError: String?
+    /// The open "Exit Confirmation" (GTK PuTTY's warn-on-close box), and
+    /// the window it would close.
+    @State private var closeConfirmation: SessionController.CloseWarning?
+    @State private var closingWindow = WeakWindow()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
-    init(request: SessionRequest, store: SavedSessionStore) {
+    init(request: SessionRequest, appModel: AppModel) {
         self.request = request
-        self.store = store
+        self.appModel = appModel
         _controller = State(initialValue: SessionController(settings: request.settings))
     }
 
@@ -59,6 +66,13 @@ struct SessionWindow: View {
             .frame(minWidth: 160, minHeight: 80)
             .navigationTitle(windowTitle)
             .task { connect() }
+            .onAppear { appModel.register(controller, for: request.id) }
+            .onDisappear {
+                // As GTK PuTTY, the Event Log goes with its window.
+                dismissWindow(id: WindowID.eventLog, value: request.id)
+                appModel.unregister(window: request.id)
+            }
+            .background { WindowCloseGuard(shouldClose: shouldClose) }
             .onChange(of: controller.state) { _, state in stateChanged(state) }
             .sheet(item: Binding(get: { controller.pendingPrompt },
                                  set: { _ in })) { prompt in
@@ -89,9 +103,64 @@ struct SessionWindow: View {
             } message: {
                 Text(reconfigurationError ?? "")
             }
+            .background {
+                // GTK PuTTY's nonfatal message box, one at a time.
+                Color.clear
+                    .alert("SwiftPutty Error", isPresented: Binding(
+                        get: { !controller.errorMessages.isEmpty },
+                        set: { if !$0 { controller.dismissErrorMessage() } })) {
+                        Button("OK") {}
+                    } message: {
+                        Text(controller.errorMessages.first ?? "")
+                    }
+            }
+            .background {
+                Color.clear
+                    .alert("SwiftPutty Exit Confirmation", isPresented: Binding(
+                        get: { closeConfirmation != nil },
+                        set: { if !$0 { closeConfirmation = nil } })) {
+                        Button("Yes") { closingWindow.window?.close() }
+                        Button("No", role: .cancel) {}
+                    } message: {
+                        Text(closeConfirmation?.message ?? "")
+                    }
+            }
             .focusedSceneValue(\.sessionActions, SessionActions(
                 changeSettings: changeSettings,
-                canChangeSettings: controller.session != nil && !controller.isChangingSettings))
+                canChangeSettings: controller.session != nil && !controller.isChangingSettings,
+                restart: { controller.restart() },
+                canRestart: controller.canRestart,
+                duplicate: duplicate,
+                showEventLog: { openWindow(id: WindowID.eventLog, value: request.id) },
+                specials: controller.specials,
+                runSpecial: { controller.runSpecial($0) },
+                clearScrollback: { controller.clearScrollback() },
+                resetTerminal: { controller.resetTerminal() }))
+    }
+
+    // MARK: Session operations (M10)
+
+    /// GTK PuTTY's delete_window: a connected session asks first, if
+    /// "Warn before closing window" is on.
+    private func shouldClose(_ window: NSWindow) -> Bool {
+        guard controller.mayNeedCloseWarning else { return true }
+        // Already asking: as GTK, just bring the question back.
+        guard closeConfirmation == nil else { return false }
+        Task {
+            if let warning = await controller.closeWarning() {
+                closingWindow.window = window
+                closeConfirmation = warning
+            } else {
+                window.close()             // ended meanwhile
+            }
+        }
+        return false
+    }
+
+    /// Duplicate Session: a new window with the running settings
+    /// (launch_duplicate_session(inst->conf)).
+    private func duplicate() {
+        openWindow(id: WindowID.session, value: SessionRequest(settings: controller.settings))
     }
 
     // MARK: Change Settings (GTK PuTTY change_settings_menuitem)
@@ -167,4 +236,9 @@ struct SessionWindow: View {
             break
         }
     }
+}
+
+/// A window reference that does not keep the window alive.
+final class WeakWindow {
+    weak var window: NSWindow?
 }

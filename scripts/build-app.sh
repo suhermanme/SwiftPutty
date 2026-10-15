@@ -25,7 +25,7 @@ xcodebuild \
     -scheme SwiftPutty \
     -configuration "$CONFIG" \
     -derivedDataPath "$ROOT/build/DerivedData" \
-    "${DESTINATION[@]}" \
+    ${DESTINATION[@]+"${DESTINATION[@]}"} \
     build
 
 APP="$ROOT/build/DerivedData/Build/Products/$CONFIG/SwiftPutty.app"

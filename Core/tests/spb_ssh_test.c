@@ -6,7 +6,10 @@
  * output, terminal size, exit status, and closing with a prompt pending.
  * Live reconfiguration (M07) and port forwarding (M08): local, dynamic
  * and remote forwardings added, used and removed on a live connection,
- * their status events, and the H-1 / H-2 regressions.
+ * their status events, and the H-1 / H-2 regressions. Session
+ * operations (M10): the Special Commands list and a user-requested
+ * rekey, Clear Scrollback, Reset Terminal, the close warning, and
+ * Restart Session.
  *
  * Uses only the public PuTTYBridge.h API. Exit status 0 on success.
  */
@@ -166,6 +169,15 @@ typedef struct record {
     struct { spb_portfwd_state state; char key[64]; char message[256]; }
         portfwd[256];
     int n_portfwd;
+    /* Special Commands (M10): the last list, and how many lists */
+    struct { spb_special_kind kind; char name[64]; int32_t code, arg; }
+        specials[128];
+    size_t n_specials;
+    int specials_updates;
+    /* Close warning answers (M10) */
+    int close_warnings;
+    bool close_connected;
+    char close_text[256];
 } record;
 
 static record rec = {
@@ -249,7 +261,30 @@ static void cb_portfwd(void *ctx, const spb_portfwd_status *st)
              });
 }
 
+static void cb_specials(void *ctx, const spb_special *list, size_t n)
+{
+    WITH_REC(rec.n_specials = n < 128 ? n : 128;
+             for (size_t i = 0; i < rec.n_specials; i++) {
+                 rec.specials[i].kind = list[i].kind;
+                 snprintf(rec.specials[i].name, sizeof(rec.specials[0].name),
+                          "%s", list[i].name ? list[i].name : "");
+                 rec.specials[i].code = list[i].code;
+                 rec.specials[i].arg = list[i].arg;
+             }
+             rec.specials_updates++);
+}
+
+static void cb_close_warning(void *ctx, uint64_t request, bool connected,
+                             const char *text)
+{
+    WITH_REC(rec.close_warnings++; rec.close_connected = connected;
+             snprintf(rec.close_text, sizeof(rec.close_text), "%s",
+                      text ? text : ""));
+}
+
 static const spb_session_callbacks callbacks = {
+    .specials_changed = cb_specials,
+    .close_warning = cb_close_warning,
     .state_changed = cb_state,
     .remote_exit = cb_exit,
     .released = cb_released,
@@ -295,7 +330,9 @@ static void reset_record(void)
     rec.event_log[0] = '\0';
     rec.reconfigured = 0;
     rec.n_portfwd = 0;
-    WITH_REC(rec.state = SPB_SESSION_CREATED; rec.detail[0] = 0;
+    WITH_REC(rec.n_specials = 0; rec.specials_updates = 0;
+             rec.close_warnings = 0; rec.close_text[0] = 0;
+             rec.state = SPB_SESSION_CREATED; rec.detail[0] = 0;
              rec.got_exit = false; rec.released = false; rec.prompts = 0;
              rec.prompts_cancelled = 0);
 }
@@ -544,6 +581,197 @@ static void test_live_reconfigure(fixture *f)
 
     spb_session_close(session);
     CHECK(wait_rec(is_final, 10));
+    release_session();
+}
+
+/* ---------- Session operations (M10) ---------- */
+
+static bool has_specials(void) { return rec.n_specials > 0; }
+static bool no_specials(void)
+{
+    return rec.n_specials == 0 && rec.specials_updates > 0;
+}
+static bool close_warned(void) { return rec.close_warnings > 0; }
+static bool rekeyed_by_user(void)
+{
+    return strstr(rec.event_log,
+                  "Initiating key re-exchange (at user request)") != NULL;
+}
+static bool restarted_log(void)
+{
+    return strstr(rec.event_log, "----- Session restarted -----") != NULL;
+}
+
+/* The listed entry called name: its index, or -1. */
+static int find_special(const char *name)
+{
+    int found = -1;
+    pthread_mutex_lock(&rec.lock);
+    for (size_t i = 0; i < rec.n_specials && found < 0; i++)
+        if (!strcmp(rec.specials[i].name, name))
+            found = (int)i;
+    pthread_mutex_unlock(&rec.lock);
+    return found;
+}
+
+/* The terminal updates on PuTTY's own timer: poll the frames. */
+static bool wait_frame(bool (*pred)(void), double timeout)
+{
+    double deadline = now_seconds() + timeout;
+    while (now_seconds() < deadline) {
+        read_frame();
+        if (pred())
+            return true;
+        usleep(5000);
+    }
+    return false;
+}
+
+static bool scrollback_empty(void)
+{
+    return info.scroll_total == info.scroll_page;
+}
+
+static bool screen_cleared(void)
+{
+    return strstr(screen_text(), "line-60") == NULL;
+}
+
+static void query_close_warning(void)
+{
+    WITH_REC(rec.close_warnings = 0);
+    spb_session_query_close_warning(session, 1);
+    CHECK(wait_rec(close_warned, 10));
+}
+
+static void login_with_password(void)
+{
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    type("weasel\r");
+    CHECK(wait_rec(is_connected, 20));
+}
+
+static void test_session_operations(fixture *f)
+{
+    open_session(f->port, "tester", false);
+    login_with_password();
+
+    /* The Special Commands, as SSH-2 lists them: Break and the signals,
+     * a submenu of more signals, then "Repeat key exchange" after a
+     * separator. Closed submenus, and no trailing end marker. */
+    CHECK(wait_rec(has_specials, 20));
+    int brk = find_special("Break"), rekey = find_special("Repeat key exchange");
+    int more = find_special("More signals");
+    CHECK(brk >= 0 && rekey >= 0 && more >= 0);
+    pthread_mutex_lock(&rec.lock);
+    int depth = 0;
+    bool separator = false;
+    for (size_t i = 0; i < rec.n_specials; i++) {
+        depth += rec.specials[i].kind == SPB_SPECIAL_SUBMENU;
+        depth -= rec.specials[i].kind == SPB_SPECIAL_END_SUBMENU;
+        CHECK(depth >= 0);
+        separator |= rec.specials[i].kind == SPB_SPECIAL_SEPARATOR;
+    }
+    CHECK(depth == 0 && separator);
+    CHECK(more >= 0 && rec.specials[more].kind == SPB_SPECIAL_SUBMENU);
+    int32_t rekey_code = rekey >= 0 ? rec.specials[rekey].code : 0;
+    int32_t rekey_arg = rekey >= 0 ? rec.specials[rekey].arg : 0;
+    pthread_mutex_unlock(&rec.lock);
+
+    /* Not listed: ignored. Then the listed rekey, on the same
+     * connection. */
+    uint64_t transport = spb_session_transport_id(session);
+    spb_session_special(session, 0x7fff, 0);
+    spb_session_special(session, rekey_code, rekey_arg);
+    CHECK(wait_rec(rekeyed_by_user, 20));
+    type("echo after-rekey-$((4*4))\r");
+    CHECK(wait_screen("\nafter-rekey-16\n", 20));
+    CHECK(spb_session_transport_id(session) == transport);
+
+    /* Clear Scrollback: only the screen is left. */
+    type("for i in $(seq 1 60); do echo line-$i; done\r");
+    CHECK(wait_screen("\nline-60\n", 20));
+    read_frame();
+    CHECK(info.scroll_total > info.scroll_page);
+    spb_session_clear_scrollback(session);
+    CHECK(wait_frame(scrollback_empty, 10));
+
+    /* Reset Terminal clears the screen (term_pwron with clear). */
+    spb_session_reset_terminal(session);
+    CHECK(wait_frame(screen_cleared, 10));
+    type("echo reset-$((3*3))\r");
+    CHECK(wait_screen("reset-9\n", 20));
+
+    /* Connected: closing would end the session. No sharing, no extra
+     * text. Restart is ignored while connected. */
+    query_close_warning();
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.close_connected && rec.close_text[0] == 0);
+    pthread_mutex_unlock(&rec.lock);
+    spb_session_restart(session);
+    CHECK(spb_core_barrier());
+    CHECK(spb_session_transport_id(session) == transport);
+    CHECK(!restarted_log());
+
+    /* Closed: no specials, nothing to warn about. */
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    CHECK(wait_rec(no_specials, 10));
+    query_close_warning();
+    pthread_mutex_lock(&rec.lock);
+    CHECK(!rec.close_connected);
+    pthread_mutex_unlock(&rec.lock);
+    spb_session_special(session, rekey_code, rekey_arg);  /* no backend */
+
+    /* Restart Session: a new connection on the same session and
+     * terminal, logged as upstream does. */
+    spb_session_restart(session);
+    CHECK(wait_rec(restarted_log, 10));
+    login_with_password();
+    CHECK(spb_session_transport_id(session) != transport);
+    CHECK(wait_rec(has_specials, 20));
+    type("echo again-$((7*6))\r");
+    CHECK(wait_screen("\nagain-42\n", 20));
+
+    /* Ended by the remote side, then restarted again. */
+    type("exit\r");
+    CHECK(wait_rec(is_final, 20));
+    spb_session_reset_terminal(session);   /* forget the last prompt */
+    CHECK(spb_core_barrier());
+    spb_session_restart(session);
+    login_with_password();
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+}
+
+/* A failed connection can be restarted too, and fails again. */
+static void test_restart_after_failure(void)
+{
+    int port;
+    {
+        /* A port with nothing listening. */
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in a = { .sin_family = AF_INET,
+                                 .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+        socklen_t len = sizeof(a);
+        bind(fd, (struct sockaddr *)&a, sizeof(a));
+        getsockname(fd, (struct sockaddr *)&a, &len);
+        port = ntohs(a.sin_port);
+        close(fd);
+    }
+    open_session(port, "tester", false);
+    CHECK(wait_rec(is_final, 20));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.state == SPB_SESSION_FAILED);
+    rec.state = SPB_SESSION_CREATED;
+    pthread_mutex_unlock(&rec.lock);
+    spb_session_restart(session);
+    CHECK(wait_rec(is_final, 20));
+    CHECK(restarted_log());
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.state == SPB_SESSION_FAILED);
+    pthread_mutex_unlock(&rec.lock);
     release_session();
 }
 
@@ -1001,6 +1229,8 @@ int main(void)
     test_stored_key_and_wrong_password(&server);
     test_live_reconfigure(&server);
     test_port_forwarding(&server);
+    test_session_operations(&server);
+    test_restart_after_failure();
     test_accept_once_and_cancel();
     test_changed_host_key(&server);
     test_public_key_auth();

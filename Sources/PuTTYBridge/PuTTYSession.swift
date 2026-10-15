@@ -3,8 +3,9 @@ import PuTTYBridgeC
 
 /// Lifecycle state of a ``PuTTYSession``.
 ///
-/// States only move forward, in declaration order; `closed` and `failed`
-/// are final.
+/// States move forward, in declaration order; `closed` and `failed` end
+/// a connection. Only ``PuTTYSession/restart()`` starts a new one, from
+/// `connecting` again.
 public enum PuTTYSessionState: Int, Sendable, Comparable, CustomStringConvertible {
     /// Not started yet.
     case created
@@ -46,8 +47,8 @@ public enum PuTTYSessionState: Int, Sendable, Comparable, CustomStringConvertibl
 public enum PuTTYSessionEvent: Sendable, Equatable {
     /// The session moved to `state`; `detail` explains why, if known.
     case stateChanged(PuTTYSessionState, detail: String?)
-    /// One line of PuTTY's Event Log.
-    case eventLog(String)
+    /// One line of PuTTY's Event Log, and when PuTTY logged it.
+    case eventLog(String, time: Date)
     /// A copy of the data received from the connection, before the
     /// terminal interprets it.
     case output(Data, isStderr: Bool)
@@ -83,6 +84,15 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     /// the server, removed). Nothing is reported when the connection
     /// ends: every forwarding goes with it.
     case portForwardStatus(PortForwardStatus)
+    /// The Special Commands menu changed: the whole list (empty without
+    /// a connection).
+    case specialsChanged([SessionSpecial])
+    /// A non-fatal error PuTTY shows in a message box.
+    case errorMessage(String)
+    /// Answer to ``PuTTYSession/queryCloseWarning(request:)``: whether
+    /// closing would end a connection, and the connection's extra warning
+    /// text (such as connection-sharing downstreams it would close).
+    case closeWarning(request: UInt64, connected: Bool, text: String?)
 }
 
 /// A question PuTTY asks in a dialog box: host key confirmation, a
@@ -223,7 +233,7 @@ public final class PuTTYSession: Sendable {
             },
             event_log: { ctx, line in
                 guard let line else { return }
-                EventSink.from(ctx).yield(.eventLog(String(cString: line)))
+                EventSink.from(ctx).yield(.eventLog(String(cString: line), time: Date()))
             },
             output: { ctx, data, length, isStderr in
                 guard let data, length > 0 else { return }
@@ -282,6 +292,17 @@ public final class PuTTYSession: Sendable {
             portfwd_status: { ctx, status in
                 guard let status else { return }
                 EventSink.from(ctx).yield(.portForwardStatus(PortForwardStatus(status)))
+            },
+            specials_changed: { ctx, list, count in
+                EventSink.from(ctx).yield(.specialsChanged(SessionSpecial.tree(from: list, count: count)))
+            },
+            error_message: { ctx, message in
+                guard let message else { return }
+                EventSink.from(ctx).yield(.errorMessage(String(cString: message)))
+            },
+            close_warning: { ctx, request, connected, text in
+                EventSink.from(ctx).yield(.closeWarning(request: request, connected: connected,
+                                                        text: text.map { String(cString: $0) }))
             })
 
         var error: UnsafeMutablePointer<CChar>?
@@ -345,6 +366,36 @@ public final class PuTTYSession: Sendable {
     /// Disconnects; the session becomes ``PuTTYSessionState/closed``.
     public func close() {
         spb_session_close(handle)
+    }
+
+    /// Restart Session: once the connection has ended, connects again
+    /// with the running settings (state `connecting` again; the terminal
+    /// is reset but keeps its scrollback). Ignored while connected.
+    public func restart() {
+        spb_session_restart(handle)
+    }
+
+    /// Runs a Special Commands entry from the last
+    /// ``PuTTYSessionEvent/specialsChanged(_:)`` list; anything else is
+    /// ignored.
+    public func special(_ command: SessionSpecialCommand) {
+        spb_session_special(handle, command.code, command.argument)
+    }
+
+    /// Asks what closing would end: answered by
+    /// ``PuTTYSessionEvent/closeWarning(request:connected:text:)``.
+    public func queryCloseWarning(request: UInt64) {
+        spb_session_query_close_warning(handle, request)
+    }
+
+    /// Clear Scrollback.
+    public func clearScrollback() {
+        spb_session_clear_scrollback(handle)
+    }
+
+    /// Reset Terminal (as at power-on, clearing the screen).
+    public func resetTerminal() {
+        spb_session_reset_terminal(handle)
     }
 
     // MARK: Terminal input

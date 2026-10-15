@@ -509,3 +509,34 @@ void spb_session_copy_all(spb_session *s)
 {
     post_cmd(cmd_copy_all, new_cmd(s, NULL, 0));
 }
+
+/* unix/window.c clear_scrollback_menuitem */
+static void cmd_clear_scrollback(void *vctx)
+{
+    input_cmd *cmd = vctx;
+    if (cmd->s->term)
+        term_clrsb(cmd->s->term);
+    free_cmd(cmd);
+}
+
+void spb_session_clear_scrollback(spb_session *s)
+{
+    post_cmd(cmd_clear_scrollback, new_cmd(s, NULL, 0));
+}
+
+/* unix/window.c reset_terminal_menuitem */
+static void cmd_reset_terminal(void *vctx)
+{
+    input_cmd *cmd = vctx;
+    if (cmd->s->term) {
+        term_pwron(cmd->s->term, true);
+        if (cmd->s->ldisc)
+            ldisc_echoedit_update(cmd->s->ldisc);
+    }
+    free_cmd(cmd);
+}
+
+void spb_session_reset_terminal(spb_session *s)
+{
+    post_cmd(cmd_reset_terminal, new_cmd(s, NULL, 0));
+}

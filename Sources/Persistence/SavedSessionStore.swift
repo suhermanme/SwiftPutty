@@ -47,6 +47,10 @@ public struct SavedSessionStore: Sendable {
 
     public let fileURL: URL
 
+    /// Posted after this process saves or deletes a session (object: the
+    /// store's file URL), so that menus listing the sessions can update.
+    public static let didChangeNotification = Notification.Name("SavedSessionStoreDidChange")
+
     public init(fileURL: URL) {
         self.fileURL = fileURL
     }
@@ -87,6 +91,7 @@ public struct SavedSessionStore: Sendable {
         var document = try readDocument()
         document.sessions[Self.storedName(name)] = settings.normalised()
         try writeDocument(document)
+        postChange()
     }
 
     /// PuTTY's `del_settings`. Deleting a session that does not exist
@@ -95,6 +100,11 @@ public struct SavedSessionStore: Sendable {
         var document = try readDocument()
         guard document.sessions.removeValue(forKey: Self.storedName(name)) != nil else { return }
         try writeDocument(document)
+        postChange()
+    }
+
+    private func postChange() {
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: fileURL)
     }
 
     /// `strcmp` order, as PuTTY's `sessioncmp` after "Default Settings".
