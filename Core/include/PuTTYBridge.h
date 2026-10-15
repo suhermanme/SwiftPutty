@@ -376,10 +376,10 @@ spb_session *spb_session_create(const spb_settings *settings,
  * Connect, as PuTTY does when a session window opens: CONNECTING, then
  * CONNECTED or FAILED. Only meaningful in the CREATED state.
  *
- * SSH and Raw are supported; other protocols fail with an explanatory
- * message until their milestone (M11). SSH logins (user name, password,
- * keyboard-interactive) are prompted for in the terminal, as in PuTTY;
- * host key confirmation goes through the prompt callback.
+ * Every protocol PuTTY has on Unix (M11): SSH, Serial, Telnet, Rlogin,
+ * SUPDUP and Raw. Logins (SSH user name, password, keyboard-interactive;
+ * the Rlogin and SUPDUP user name) are prompted for in the terminal, as
+ * in PuTTY; host key confirmation goes through the prompt callback.
  */
 void spb_session_start(spb_session *session);
 

@@ -19,14 +19,16 @@ and PuTTY core integration), **M02** (session executor and event loop),
 **M03** (terminal rendering foundation), **M04** (basic SSH session),
 **M05** (saved sessions and configuration dialog), **M06** (terminal
 parity), **M07** (live Change Settings), **M08** (SSH tunnels, changed
-live), **M09** (SSH authentication and the SSH panels) and **M10** (Event
-Log and session operations) are complete. The app starts
+live), **M09** (SSH authentication and the SSH panels), **M10** (Event
+Log and session operations) and **M11** (Telnet, Rlogin, SUPDUP and serial
+lines) are complete. The app starts
 with PuTTY's configuration dialog (Session, Logging, Terminal with
 Keyboard / Bell / Features, Window with Appearance / Behaviour /
-Translation / Selection / Colours, Connection and Data; saved sessions
-with PuTTY's Load / Save / Delete rules) and opens SSH and Raw
-connections in terminal windows driven by PuTTY's own SSH implementation
-and terminal emulator, with PuTTY's host key dialog, in-terminal login
+Translation / Selection / Colours, Connection with Data, the SSH panels,
+Serial, Telnet, Rlogin and SUPDUP; saved sessions with PuTTY's Load /
+Save / Delete rules) and opens SSH, Telnet, Rlogin, SUPDUP, Raw and
+serial-line sessions in terminal windows driven by PuTTY's own protocol
+code and terminal emulator, with PuTTY's host key dialog, in-terminal login
 and session logging. Session > Change Settings… changes a running
 session without reconnecting, as PuTTY does, including adding, removing
 and editing SSH port forwardings (a failed edit keeps the old one). See

@@ -108,6 +108,19 @@ struct SecondsSetting: View {
     let model: ConfigurationModel
     let label: String
     let keyword: PuTTYKeyword
+
+    var body: some View {
+        FixedPointSetting(model: model, label: label, keyword: keyword, denominator: 1_000_000)
+    }
+}
+
+/// config.c's fixed-point edit box (`EDIT_FIXEDPOINT`): the saved value
+/// over `denominator`. The text is the user's while they type.
+struct FixedPointSetting: View {
+    let model: ConfigurationModel
+    let label: String
+    let keyword: PuTTYKeyword
+    let denominator: Int
     @State private var text = ""
 
     var body: some View {
@@ -116,15 +129,14 @@ struct SecondsSetting: View {
                 .labelsHidden()
                 .accessibilityLabel(label)
                 .frame(width: 80)
-                .onAppear { text = model.seconds(keyword) }
+                .onAppear { text = ConfigurationModel.formatFixedPoint(model.int(keyword), denominator: denominator) }
                 .onChange(of: text) { _, newText in
-                    if ConfigurationModel.parseFixedPoint(newText, denominator: 1_000_000) != model.int(keyword) {
-                        model.setSeconds(keyword, newText)
-                    }
+                    let value = ConfigurationModel.parseFixedPoint(newText, denominator: denominator)
+                    if value != model.int(keyword) { model.setInt(keyword, value) }
                 }
                 .onChange(of: model.int(keyword)) { _, value in
-                    if ConfigurationModel.parseFixedPoint(text, denominator: 1_000_000) != value {
-                        text = model.seconds(keyword)
+                    if ConfigurationModel.parseFixedPoint(text, denominator: denominator) != value {
+                        text = ConfigurationModel.formatFixedPoint(value, denominator: denominator)
                     }
                 }
         }

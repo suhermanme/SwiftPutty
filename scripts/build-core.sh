@@ -64,7 +64,7 @@ configure_and_build() {
         || { cat "$dir.configure.log" >&2; return 1; }
     cmake --build "$dir" --target swiftputty-core spb_bridge_test spb_session_test \
         spb_terminal_test spb_ssh_test spb_ssh_fixture uppity \
-        spb_link_closure_test
+        spb_backends_test spb_link_closure_test
 }
 
 LIBS=()
@@ -90,7 +90,7 @@ if [[ $RUN_TESTS == 1 ]]; then
     section "C bridge tests ($HOST_ARCH)"
     (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
     for test in spb_bridge_test spb_session_test spb_terminal_test \
-                spb_ssh_test; do
+                spb_ssh_test spb_backends_test; do
         section "$test under leaks --atExit ($HOST_ARCH)"
         leaks --atExit -- "$BUILD/core-$HOST_ARCH/$test" \
             | grep -E "^Process [0-9]+: [0-9]+ leaks" \

@@ -34,6 +34,8 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     free unanswered global requests at teardown.
   - `0008-portfwd-duplicate-rportfwd-free.patch`: fix a use after free
     after a duplicate remote port forwarding.
+  - `0009-rlogin-free-username-prompt.patch`: free the Rlogin user name
+    prompt once it has been answered.
   - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as
     upstream's OS X build does, so the Meta-key settings are saved.
   - At compile time (no source change), the session-storage functions of

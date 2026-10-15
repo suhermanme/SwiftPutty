@@ -32,7 +32,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 |---|---|---|---|---|
 | Host Name / IP (`CONF_host`) | Session panel edit box; upstream `prepare_session` applied at connect (user@, :suffix) | COMPLETE | reconnect |  |
 | Port (`CONF_port`) | Session panel edit box (0 shown blank) | COMPLETE | reconnect | Default depends on protocol (load_custom). Follows the protocol while it is still the old default (`config_protocols_handler`) |
-| Connection type (`CONF_protocol`) | Radio: SSH, Other: popup | PARTIAL | reconnect | M05: SSH and Raw; Serial, Telnet, Rlogin, SUPDUP in M11 |
+| Connection type (`CONF_protocol`) | Radio: SSH, Serial, Other: popup (Telnet, Rlogin, SUPDUP, Raw), be_list.c's order; the port follows the protocol while it is the old default | COMPLETE | reconnect | M11: every Unix backend. For Serial the host and port boxes become "Serial line" (with a menu of `/dev/cu.*`) and "Speed", as config.c |
 | Saved Sessions list / Load / Save / Delete | Session panel: name box, list (Default Settings first), Load/Save/Delete; double-click opens | COMPLETE | Save: runtime (mid-session "Save the current session settings"); Load/Delete: reconnect (hidden) | Versioned JSON store, not the registry (D-027); PuTTY's rules (`sessionsaver_handler`). Mid-session: "Save the current session settings" (Save only), as config.c |
 | Close window on exit (`CONF_close_on_exit`) | Radio Always/Never/Only on clean exit | COMPLETE | runtime | Read by the frontend at exit. |
 
@@ -281,21 +281,21 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Serial line (`CONF_serline`) | Popup enumerating `/dev/cu.*` (and `/dev/tty.*` on request) + free text | NOT STARTED | reconnect | `unix/serial.c` |
-| Speed (`CONF_serspeed`) | Number field | NOT STARTED | runtime | `serial_reconfig` → `serial_configure`; errors are discarded upstream (FIXME), so SwiftPutty re-reads termios and reports |
-| Data bits / Stop bits (`CONF_serdatabits`, `CONF_serstopbits`) | Fields | NOT STARTED | runtime | Same |
-| Parity / Flow control (`CONF_serparity`, `CONF_serflow`) | Popups | NOT STARTED | runtime | Same |
+| Serial line (`CONF_serline`) | Edit box with a menu of `/dev/cu.*` devices; hidden mid-session (config.c) | COMPLETE | reconnect | `unix/serial.c`. Any path can be typed (e.g. a `/dev/tty.*`) |
+| Speed (`CONF_serspeed`) | Number field | COMPLETE | runtime | `serial_reconfig` → `serial_configure`; tested live (the line's termios speed changes). Upstream discards errors from a reconfiguration (FIXME); SwiftPutty does the same; the Event Log shows what was configured |
+| Data bits / Stop bits (`CONF_serdatabits`, `CONF_serstopbits`) | Number field; fixed-point box in half bits (1, 1.5, 2) | COMPLETE | runtime | Same |
+| Parity / Flow control (`CONF_serparity`, `CONF_serflow`) | Popups: None/Odd/Even; None/XON/XOFF/RTS/CTS (the Unix backend's masks) | COMPLETE | runtime | Same |
 
 ## Connection → Telnet / Rlogin / SUPDUP
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| OLD_ENVIRON ambiguity (`CONF_rfc_environ`) | Radio | NOT STARTED | reconnect | |
-| Telnet negotiation mode (`CONF_passive_telnet`) | Radio | NOT STARTED | reconnect | |
-| Keyboard sends Telnet specials (`CONF_telnet_keyboard`) | Checkbox | NOT STARTED | runtime | `telnet_reconfig` stores conf |
-| Return sends Telnet New Line (`CONF_telnet_newline`) | Checkbox | NOT STARTED | runtime | |
-| Rlogin local username (`CONF_localusername`) | Text field | NOT STARTED | reconnect | Panel hidden mid-session (`DISPLAY_NON_RECONFIGURABLE_PROTOCOL`) |
-| SUPDUP location, ASCII set, MORE, scrolling (`CONF_supdup_*`) | Fields | NOT STARTED | reconnect | Panel hidden mid-session |
+| OLD_ENVIRON ambiguity (`CONF_rfc_environ`) | Radio BSD / RFC 1408 | COMPLETE | reconnect | Hidden mid-session, as config.c |
+| Telnet negotiation mode (`CONF_passive_telnet`) | Radio Passive / Active | COMPLETE | reconnect | Hidden mid-session; both modes tested |
+| Keyboard sends Telnet specials (`CONF_telnet_keyboard`) | Checkbox | COMPLETE | runtime | `telnet_reconfig` stores conf |
+| Return sends Telnet New Line (`CONF_telnet_newline`) | Checkbox | COMPLETE | runtime | Tested both ways (CR LF / CR) |
+| Rlogin local username (`CONF_localusername`) | Text field | COMPLETE | reconnect | Panel hidden mid-session (`DISPLAY_NON_RECONFIGURABLE_PROTOCOL`) |
+| SUPDUP location, ASCII set, MORE, scrolling (`CONF_supdup_*`) | Location box, character set radio, two checkboxes | COMPLETE | reconnect | Panel hidden mid-session |
 
 ## Not in the Windows dialog but in `conf.h`
 

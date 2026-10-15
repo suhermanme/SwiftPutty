@@ -22,3 +22,4 @@ Each patch:
 | `0006-portfwd-status-hook.patch` | Structured port forwarding status for front ends (optional `LogPolicy` method) | SwiftPutty-specific; could be offered |
 | `0007-rportfwd-cancel-pending-reply.patch` | Use after free when a remote forwarding is removed before the server answers (H-1); leaked outstanding global requests at teardown | Not yet reported; should be (memory safety) |
 | `0008-portfwd-duplicate-rportfwd-free.patch` | Use after free after a duplicate remote forwarding (H-2) | Not yet reported; should be (memory safety) |
+| `0009-rlogin-free-username-prompt.patch` | The Rlogin user name prompt leaked once answered | Not yet reported; suitable for upstream |

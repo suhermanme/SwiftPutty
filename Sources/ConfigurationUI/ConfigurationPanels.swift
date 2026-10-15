@@ -17,36 +17,58 @@ struct SessionPanel: View {
     private enum Field: Hashable { case host, port, savedName, sessionList }
     @FocusState private var focus: Field?
 
-    /// The connection types SwiftPutty can start so far: PuTTY's radio
-    /// buttons are SSH and Serial, then "Other:" with a list (Telnet,
-    /// Rlogin, SUPDUP, Raw); the others arrive with M11.
-    private static let otherTypes = [(label: "Raw", value: "raw")]
+    /// PuTTY's connection types on Unix, in be_list.c's order: SSH and
+    /// Serial as radio buttons, then "Other:" with a list.
+    private static let otherTypes = [(label: "Telnet", value: "telnet"), (label: "Rlogin", value: "rlogin"),
+                                     (label: "SUPDUP", value: "supdup"), (label: "Raw", value: "raw")]
+
+    private var isSerial: Bool { model.connectionType == "serial" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !model.isMidSession {
                 SettingsGroup(title: "Specify the destination you want to connect to") {
                     HStack(alignment: .bottom) {
+                        // config_host_handler / config_port_handler: for
+                        // Serial the boxes are the line and its speed.
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Host Name (or IP address)")
-                            PlainTextField(label: "Host Name (or IP address)",
-                                           text: Binding(get: { model.string(.hostName) },
-                                                         set: { model.setString(.hostName, $0) }))
-                                .focused($focus, equals: .host)
+                            if isSerial {
+                                Text("Serial line")
+                                SerialLineField(label: "Serial line",
+                                                line: Binding(get: { model.string(.serialLine) },
+                                                              set: { model.setString(.serialLine, $0) }))
+                                    .focused($focus, equals: .host)
+                            } else {
+                                Text("Host Name (or IP address)")
+                                PlainTextField(label: "Host Name (or IP address)",
+                                               text: Binding(get: { model.string(.hostName) },
+                                                             set: { model.setString(.hostName, $0) }))
+                                    .focused($focus, equals: .host)
+                            }
                         }
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Port")
-                            IntegerField(label: "Port", value: $model.port, blankWhenZero: true)
-                                .focused($focus, equals: .port)
-                                .frame(width: 80)
+                            Text(isSerial ? "Speed" : "Port")
+                            Group {
+                                if isSerial {
+                                    IntegerField(label: "Speed",
+                                                 value: Binding(get: { model.int(.serialSpeed) },
+                                                                set: { model.setInt(.serialSpeed, $0) }))
+                                } else {
+                                    IntegerField(label: "Port", value: $model.port, blankWhenZero: true)
+                                }
+                            }
+                            .id(isSerial)          // each box keeps its own text
+                            .focused($focus, equals: .port)
+                            .frame(width: 80)
                         }
                     }
                     Text("Connection type:")
                     HStack {
                         Picker("Connection type", selection: Binding(
-                            get: { model.connectionType == "ssh" ? "ssh" : "other" },
-                            set: { model.connectionType = $0 == "ssh" ? "ssh" : otherType })) {
+                            get: { ["ssh", "serial"].contains(model.connectionType) ? model.connectionType : "other" },
+                            set: { model.connectionType = $0 == "other" ? otherType : $0 })) {
                             Text("SSH").tag("ssh")
+                            Text("Serial").tag("serial")
                             Text("Other:").tag("other")
                         }
                         .pickerStyle(.radioGroup)

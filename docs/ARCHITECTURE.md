@@ -265,7 +265,9 @@ queue are only touched on the core thread and are rescanned every
 iteration, `uxsel_input_add`/`remove` and `timer_change_notify` need no
 action, exactly as in cliloop. Running the loop on macOS exposed an
 upstream `pollwrap` bug (refused connections spun the loop), fixed by
-patch `0002`.
+patch `0002`. *Since M11 the loop waits with `select()` instead of
+`pollwrap`:* macOS's `poll()` never reports TCP urgent data, which every
+PuTTY socket asks for as `SELECT_X` (D-035).
 
 Known consequence: `name_lookup()` (`unix/network.c`, `getaddrinfo`) is
 synchronous. A slow DNS lookup in one session stalls all sessions on the core

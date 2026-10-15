@@ -1,0 +1,32 @@
+SwiftPutty local patch 0009
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+Free the Rlogin user name prompt once it has been answered.
+
+When no remote user name is configured, rlogin asks for one in the
+terminal ("rlogin username:"). rlogin_startup() then sends the greeting
+using the answer and sets rlogin->prompt to NULL (which tells
+rlogin_sendok() that input may flow), but never frees the prompts_t, so
+rlogin_free() cannot free it either: every such login leaked the prompt
+and its strings. Found with `leaks --atExit` (Core/tests/spb_backends_test.c).
+
+Free it before forgetting it; the answer has already been written to
+the socket.
+
+--- a/otherbackends/rlogin.c
++++ b/otherbackends/rlogin.c
+@@ -194,7 +194,12 @@
+         rlogin->bufsize = sk_write(rlogin->s, &z, 1);
+     }
+ 
+-    rlogin->prompt = NULL;
++    /* The user name prompt (if any) is answered and finished with: the
++     * result has been sent above. */
++    if (rlogin->prompt) {
++        free_prompts(rlogin->prompt);
++        rlogin->prompt = NULL;
++    }
+     if (rlogin->ldisc)
+         ldisc_check_sendok(rlogin->ldisc);
+ }

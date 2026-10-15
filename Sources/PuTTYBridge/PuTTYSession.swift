@@ -325,10 +325,9 @@ public final class PuTTYSession: Sendable {
 
     /// Connects, as PuTTY does when a session window opens.
     ///
-    /// SSH and Raw are supported; other protocols fail with an
-    /// explanatory message until their milestone (M11). SSH logins are
-    /// prompted for in the terminal; host keys through
-    /// ``PuTTYSessionEvent/prompt(_:)``.
+    /// Every protocol PuTTY has on Unix: SSH, Serial, Telnet, Rlogin,
+    /// SUPDUP and Raw. Logins are prompted for in the terminal; host keys
+    /// through ``PuTTYSessionEvent/prompt(_:)``.
     public func start() {
         spb_session_start(handle)
     }

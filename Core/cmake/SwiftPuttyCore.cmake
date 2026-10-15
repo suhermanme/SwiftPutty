@@ -213,6 +213,15 @@ function(swiftputty_define_core)
   target_link_options(uppity PRIVATE -Wl,-no_warn_duplicate_libraries)
   add_test(NAME spb_ssh_test COMMAND spb_ssh_test)
 
+  # Telnet, Rlogin, SUPDUP and serial (M11), against peers played by
+  # the test itself (a loopback socket, a pseudo-terminal).
+  add_executable(spb_backends_test ${B}/tests/spb_backends_test.c)
+  set_property(TARGET spb_backends_test PROPERTY LINK_LIBRARIES
+    swiftputty-core)
+  target_compile_options(spb_backends_test PRIVATE
+    -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+  add_test(NAME spb_backends_test COMMAND spb_backends_test)
+
   # Link every archive member, not just the ones a program happens to
   # reference, so that any unresolved symbol in the core fails the build.
   add_executable(spb_link_closure_test ${B}/tests/spb_link_closure_test.c)

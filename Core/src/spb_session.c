@@ -188,19 +188,6 @@ void spb_session_connection_fatal(spb_session *s, const char *message)
     queue_toplevel_callback(connection_fatal_callback, s);
 }
 
-/* Protocols whose frontend requirements exist so far. */
-static const char *unsupported_protocol_reason(int protocol)
-{
-    switch (protocol) {
-      case PROT_RAW:
-      case PROT_SSH:
-      case PROT_SSHCONN:
-        return NULL;
-      default:
-        return "This connection type is not available yet in this build "
-            "(milestone M11)";
-    }
-}
 
 typedef struct input_special {
     spb_session *s;
@@ -210,14 +197,13 @@ typedef struct input_special {
 /* unix/window.c start_backend */
 static void start_backend(spb_session *s)
 {
+    /* Every backend upstream builds for a Unix GUI tool (M11): SSH,
+     * Serial, Telnet, Rlogin, SUPDUP and Raw. */
     int protocol = conf_get_int(s->conf, CONF_protocol);
-    const char *reason = unsupported_protocol_reason(protocol);
     const BackendVtable *vt = backend_vt_from_proto(protocol);
-    if (!reason && !vt)
-        reason = "Unknown connection type";
-    if (reason) {
+    if (!vt) {
         s->exited = true;
-        spb_session_set_state(s, SPB_SESSION_FAILED, reason);
+        spb_session_set_state(s, SPB_SESSION_FAILED, "Unknown connection type");
         return;
     }
 

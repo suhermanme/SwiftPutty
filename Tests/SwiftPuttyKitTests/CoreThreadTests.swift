@@ -94,16 +94,17 @@ extension KitTests {
             #expect(collector.lastDetail?.hasPrefix("Unable to open connection to no-such-host.invalid") == true)
         }
 
-        @Test func telnetIsNotAvailableYet() async throws {
+        @Test func aSerialLineThatDoesNotExistFails() async throws {
             try TestCore.initialize()
-            var settings = rawSettings(port: 23)
-            settings["Protocol"] = "telnet"
+            var settings = rawSettings(host: "", port: 0)
+            settings["Protocol"] = "serial"
+            settings["SerialLine"] = "/dev/spb-no-such-line"
             let session = try PuTTYSession(settings: settings)
             let collector = EventCollector(session.events)
             session.start()
             #expect(await collector.wait(for: .failed))
-            #expect(collector.states == [.failed])
-            #expect(collector.lastDetail?.contains("M11") == true)
+            #expect(collector.states == [.connecting, .failed])
+            #expect(collector.lastDetail?.contains("/dev/spb-no-such-line") == true)
         }
 
         @Test func callbacksRunOnTheCoreThreadNotTheMainThread() async throws {

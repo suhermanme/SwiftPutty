@@ -47,7 +47,8 @@ Telnet) and diverges from upstream's loop.
 All bridge calls enqueue. All PuTTY callbacks run on that thread and are
 forwarded to Swift, which hops to `@MainActor`.
 **Consequences:** Exact upstream event semantics. A slow DNS lookup in one
-session can stall others (risk R-2; revisit by M14).
+session can stall others (risk R-2; revisit by M14). *Amended by D-035
+(M11): the loop waits with `select()`, not `poll()`.*
 
 ## D-004 — Convert configuration through PuTTY's own settings code
 
@@ -653,3 +654,32 @@ hook to refuse a window close.
 **Consequences:** A restarted window keeps its terminal, scrollback, Event
 Log and log file, as in GTK PuTTY. If SwiftUI ever replaces the window's
 delegate, the guard wraps it again on the next view update.
+
+## D-035 — The core loop waits with select(): macOS poll() loses urgent data
+
+**Status:** Accepted (M11)
+**Context:** Every connected PuTTY socket asks uxsel for `SELECT_X`
+(`unix/network.c` `uxsel_tell`), so that TCP urgent data reaches the
+backend: Rlogin servers ask for the window size that way (0x80), and
+Telnet uses it for SYNCH. Upstream's `pollwrap` maps `SELECT_X` to
+`POLLPRI`. On macOS, `poll()` never reports urgent data: a probe with
+one urgent byte pending gets no `POLLPRI`, no `POLLRDBAND` and does not
+even wake, while `select()` puts the socket in its exception set and
+`recv(MSG_OOB)` returns the byte. Found by the M11 Rlogin test: the
+server's request was never answered. Unpatched upstream PuTTY on macOS
+would behave the same.
+**Options considered:** (a) Patch pollwrap to add a `select()` check
+after each `poll()`. Rejected: `poll()` does not wake for the urgent
+byte, so it would be noticed only when other data arrived. (b) kqueue.
+Rejected: a third event mechanism for one bit of semantics. (c) Wait
+with `select()`, as PuTTY's Unix loops did before pollwrap.
+**Decision:** (c). `spb_eventloop.c` builds read, write and exception
+sets sized to the highest descriptor, with `_DARWIN_UNLIMITED_SELECT`
+so `FD_SETSIZE` does not limit the number of sessions. The sets are
+rebuilt every iteration (select overwrites them); an interrupted wait
+goes round the outer loop instead of retrying with undefined sets.
+**Consequences:** Rlogin window size requests and Telnet SYNCH work. A
+refused `connect()` still wakes the loop (select reports the socket
+writable), so patch `0002` is no longer exercised by the loop; it stays
+applied, as pollwrap is upstream code still built. Cost is O(highest
+descriptor) per iteration, small next to the per-iteration uxsel rescan.

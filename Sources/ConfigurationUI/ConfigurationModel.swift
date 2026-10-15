@@ -94,6 +94,13 @@ public final class ConfigurationModel: Identifiable {
         set { settings[.portNumber] = String(newValue) }
     }
 
+    /// The serial devices present, for the Serial line box: macOS's
+    /// call-out devices (`/dev/cu.*`), sorted.
+    public static func serialDevices(in directory: String = "/dev") -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
+        return names.filter { $0.hasPrefix("cu.") }.sorted().map { directory + "/" + $0 }
+    }
+
     /// Default ports of PuTTY's backends (`BackendVtable.default_port`).
     public static func defaultPort(for connectionType: String) -> Int {
         switch connectionType {
@@ -505,15 +512,10 @@ public final class ConfigurationModel: Identifiable {
         setInt(keyword, Self.parseFixedPoint(text, denominator: 1_000_000))
     }
 
-    /// `EDIT_FIXEDPOINT`: the value over `denominator`, without trailing
-    /// zeros.
+    /// `EDIT_FIXEDPOINT`: the value over `denominator`, as config.c
+    /// writes it (`%g`).
     public static func formatFixedPoint(_ value: Int, denominator: Int) -> String {
-        let whole = value / denominator, fraction = abs(value % denominator)
-        guard fraction != 0 else { return String(whole) }
-        var digits = String(fraction)
-        digits = String(repeating: "0", count: String(denominator).count - 1 - digits.count) + digits
-        while digits.hasSuffix("0") { digits.removeLast() }
-        return (value < 0 && whole == 0 ? "-" : "") + "\(whole).\(digits)"
+        String(format: "%g", Double(value) / Double(denominator))
     }
 
     /// As config.c reads a fixed-point box (`atof` scaled, truncated).

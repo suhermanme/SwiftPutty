@@ -13,13 +13,63 @@
 | **M08** | SSH tunnels + live tunnel reconfiguration | **COMPLETE** (2026-10-15) |
 | **M09** | SSH authentication and connection parity | **COMPLETE** (2026-10-15) |
 | **M10** | Event log and session operations | **COMPLETE** (2026-10-15) |
-| M11 | Additional PuTTY backends | NOT STARTED |
+| **M11** | Additional PuTTY backends | **COMPLETE** (2026-10-15) |
 | M12 | Configuration parity pass | NOT STARTED |
 | M13 | Security and reliability hardening | NOT STARTED |
 | M14 | Performance pass | NOT STARTED |
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M11 — Additional PuTTY backends
+
+**Delivered**
+
+- **Every Unix backend starts**: SSH, Serial, Telnet, Rlogin, SUPDUP and
+  Raw, all upstream code. Their Special Commands come through M10's menu
+  (Telnet's commands, serial Break).
+- **Core loop waits with `select()`** (D-035): macOS's `poll()` never
+  reports TCP urgent data, so Rlogin servers' window size requests (and
+  Telnet SYNCH) were lost; found by the Rlogin test, and unpatched
+  upstream would behave the same on macOS.
+- **Patch 0009**: upstream leaked the "rlogin username:" prompt once
+  answered (found by `leaks --atExit`).
+- **Configuration dialog**: Session panel radio buttons SSH / Serial /
+  Other: (Telnet, Rlogin, SUPDUP, Raw), in upstream's order; for Serial
+  the host and port boxes are "Serial line" (with a menu of `/dev/cu.*`)
+  and "Speed". Connection/Serial (line hidden mid-session; speed, data
+  bits, stop bits in half bits, parity and flow control as the Unix
+  backend offers them), Connection/Telnet, Connection/Rlogin and
+  Connection/SUPDUP panels, with config.c's mid-session rules (now on
+  the model as `shows(_:)`, tested).
+- Fixed-point edit boxes format as config.c does (`%g`), which stop bits
+  (denominator 2) need.
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo), patches 0001–0009 | PASS |
+| C tests: new `spb_backends_test` (Telnet active and passive, Rlogin incl. urgent window size request and user name prompt, SUPDUP, serial on a pty incl. live speed change); `spb_session_test` now checks a missing serial line | PASS (6 programs) |
+| `leaks --atExit`: all five C test programs | PASS (0 leaks) |
+| C tests under ASan + UBSan / TSan (Debug) | PASS |
+| `swift test` (107 tests, 22 suites; new: connection types and ports, serial launchability, stop bits, `/dev/cu.*` list, mid-session panels, a serial session through `SessionController`) | PASS |
+| `swift test --sanitize=address` / `--sanitize=thread` | PASS |
+| App Debug build; Release build, universal | PASS |
+
+**Limitations / not done**
+
+- No real serial hardware tried; the serial backend is tested on a
+  pseudo-terminal (termios settings, speed changed live, data both
+  ways). Hardware flow control and parity on a real line are untested.
+- Telnet, Rlogin and SUPDUP are tested against peers the test plays
+  itself, not against real servers (none is installed here).
+- Errors from a live serial reconfiguration are discarded, as upstream
+  does (its FIXME); the Event Log shows what was configured.
+- The configuration dialog's new panels were not clicked through by hand.
+- Connection/Proxy and the Data panel's environment variables remain
+  (M12).
 
 ## M10 — Event log and session operations
 

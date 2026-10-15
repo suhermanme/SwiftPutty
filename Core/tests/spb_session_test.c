@@ -621,10 +621,13 @@ static void test_failures(void)
     expect_failure(nxdomain, "Unable to open connection", true);
     spb_settings_free(nxdomain);
 
-    spb_settings *telnet = raw_settings("127.0.0.1", 23);
-    spb_settings_set(telnet, "Protocol", "telnet");
-    expect_failure(telnet, "M11", false);
-    spb_settings_free(telnet);
+    /* M11: every protocol starts; a serial line that does not exist
+     * fails as upstream's serial_init reports it. */
+    spb_settings *serial = raw_settings("", 0);
+    spb_settings_set(serial, "Protocol", "serial");
+    spb_settings_set(serial, "SerialLine", "/dev/spb-no-such-line");
+    expect_failure(serial, "/dev/spb-no-such-line", true);
+    spb_settings_free(serial);
 }
 
 static void test_release_paths(server *echo)

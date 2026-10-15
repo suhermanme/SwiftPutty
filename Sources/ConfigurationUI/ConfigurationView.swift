@@ -3,7 +3,7 @@ import PuTTYBridge
 import SwiftUI
 
 /// The categories of PuTTY's configuration tree that SwiftPutty has so
-/// far (`config.c` `setup_config_box`; the rest arrive with M09 and
+/// far (`config.c` `setup_config_box`; Connection/Proxy arrives with
 /// M12). Order and nesting are PuTTY's.
 public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable {
     case session, logging
@@ -11,6 +11,7 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
     case window, appearance, behaviour, translation, selection, copy, colours
     case connection, data, ssh, kex, hostKeys, cipher, auth, credentials, gssapi, tty, x11, tunnels
     case bugs, moreBugs
+    case serial, telnet, rlogin, supdup
 
     public var id: Self { self }
 
@@ -44,6 +45,10 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .tunnels: "Tunnels"
         case .bugs: "Bugs"
         case .moreBugs: "More bugs"
+        case .serial: "Serial"
+        case .telnet: "Telnet"
+        case .rlogin: "Rlogin"
+        case .supdup: "SUPDUP"
         }
     }
 
@@ -87,6 +92,10 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .x11: "Options controlling SSH X11 forwarding"
         case .bugs: "Workarounds for SSH server bugs"
         case .moreBugs: "Further workarounds for SSH server bugs"
+        case .serial: "Options controlling local serial lines"
+        case .telnet: "Options controlling Telnet connections"
+        case .rlogin: "Options controlling Rlogin connections"
+        case .supdup: "Options controlling SUPDUP connections"
         }
     }
 }
@@ -161,7 +170,7 @@ public struct ConfigurationView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .selectionDisabled()
-            ForEach(ConfigurationCategory.allCases.filter(isShown)) { category in
+            ForEach(ConfigurationCategory.allCases.filter(model.shows)) { category in
                 Text(category.name)
                     .padding(.leading, CGFloat(category.depth) * 16)
                     .tag(category)
@@ -169,24 +178,6 @@ public struct ConfigurationView: View {
         }
         .listStyle(.sidebar)
         .frame(width: 170)
-    }
-
-    /// Connection/Data only matters to a new connection (config.c hides
-    /// it mid-session).
-    private func isShown(_ category: ConfigurationCategory) -> Bool {
-        guard model.isMidSession else { return true }
-        switch category {
-        case .data: return false
-        // DISPLAY_RECONFIGURABLE_PROTOCOL: SSH panels for SSH sessions.
-        case .ssh, .tunnels: return model.connectionType == "ssh"
-        // Re-keying makes these meaningful mid-session, except on SSH-1
-        // or a connection-sharing downstream.
-        case .kex, .hostKeys, .cipher:
-            return model.connectionType == "ssh" && model.protocolInfo != 1 && model.protocolInfo != -1
-        // Only a new connection uses these.
-        case .auth, .credentials, .gssapi, .tty, .x11, .bugs, .moreBugs: return false
-        default: return true
-        }
     }
 
     @ViewBuilder
@@ -219,6 +210,36 @@ public struct ConfigurationView: View {
         case .x11: X11Panel(model: model)
         case .bugs: BugsPanel(model: model)
         case .moreBugs: MoreBugsPanel(model: model)
+        case .serial: SerialPanel(model: model)
+        case .telnet: TelnetPanel(model: model)
+        case .rlogin: RloginPanel(model: model)
+        case .supdup: SUPDUPPanel(model: model)
+        }
+    }
+}
+
+
+extension ConfigurationModel {
+    /// Which panels the tree lists: all before a session; mid-session,
+    /// config.c's rules.
+    public func shows(_ category: ConfigurationCategory) -> Bool {
+        guard isMidSession else { return true }
+        switch category {
+        // Connection/Data only matters to a new connection.
+        case .data: return false
+        // DISPLAY_RECONFIGURABLE_PROTOCOL: SSH panels for SSH sessions.
+        case .ssh, .tunnels: return connectionType == "ssh"
+        // Re-keying makes these meaningful mid-session, except on SSH-1
+        // or a connection-sharing downstream.
+        case .kex, .hostKeys, .cipher:
+            return connectionType == "ssh" && protocolInfo != 1 && protocolInfo != -1
+        // Only a new connection uses these.
+        case .auth, .credentials, .gssapi, .tty, .x11, .bugs, .moreBugs: return false
+        // DISPLAY_RECONFIGURABLE_PROTOCOL / DISPLAY_NON_RECONFIGURABLE_PROTOCOL
+        case .serial: return connectionType == "serial"
+        case .telnet: return connectionType == "telnet"
+        case .rlogin, .supdup: return false
+        default: return true
         }
     }
 }

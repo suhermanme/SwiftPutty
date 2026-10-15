@@ -1,11 +1,18 @@
 /*
  * spb_eventloop.c - the PuTTY core thread (docs/DECISIONS.md D-003).
  *
- * One dedicated thread per process runs a poll() loop modelled directly
- * on upstream's unix/cliloop.c: on every iteration it re-reads uxsel's fd
- * set (first_fd/next_fd) and the timer queue, polls, dispatches
+ * One dedicated thread per process runs a loop modelled directly on
+ * upstream's unix/cliloop.c: on every iteration it re-reads uxsel's fd
+ * set (first_fd/next_fd) and the timer queue, waits, dispatches
  * select_result(), then runs toplevel callbacks. All PuTTY code runs on
  * this thread.
+ *
+ * It waits with select(), not upstream's pollwrap (poll()): macOS's
+ * poll() never reports TCP urgent data, which every PuTTY socket asks
+ * for as SELECT_X (Rlogin's window size requests, Telnet's SYNCH), while
+ * select()'s exception set does (docs/DECISIONS.md D-035). Defining
+ * _DARWIN_UNLIMITED_SELECT lifts FD_SETSIZE; the sets are sized to the
+ * highest descriptor.
  *
  * Other threads never call into PuTTY. They post commands to a locked
  * FIFO queue and wake the loop through a self-pipe; the loop runs the
@@ -18,10 +25,14 @@
  * loop looks again before it next blocks (exactly as in cliloop).
  */
 
+#define _DARWIN_UNLIMITED_SELECT 1     /* before any system header */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <string.h>
+#include <sys/select.h>
 #include <unistd.h>
 
 #include "spb_internal.h"
@@ -190,6 +201,53 @@ static void loop_request_stop(void *ctx)
     stop_requested = true;
 }
 
+/* Read, write and exception sets for every descriptor up to maxfd. */
+typedef struct fdsets {
+    fd_set *r, *w, *x;
+    size_t capacity, used;             /* bytes per set */
+} fdsets;
+
+static void fdsets_reset(fdsets *s, int maxfd)
+{
+    size_t need = ((size_t)maxfd / NFDBITS + 1) * sizeof(fd_mask);
+    if (need > s->capacity) {
+        s->r = srealloc(s->r, need);
+        s->w = srealloc(s->w, need);
+        s->x = srealloc(s->x, need);
+        s->capacity = need;
+    }
+    s->used = need;
+    memset(s->r, 0, need);
+    memset(s->w, 0, need);
+    memset(s->x, 0, need);
+}
+
+static void fdsets_add(fdsets *s, int fd, int rwx)
+{
+    if (rwx & SELECT_R) FD_SET(fd, s->r);
+    if (rwx & SELECT_W) FD_SET(fd, s->w);
+    if (rwx & SELECT_X) FD_SET(fd, s->x);
+}
+
+static int fdsets_get(fdsets *s, int fd)
+{
+    return (FD_ISSET(fd, s->r) ? SELECT_R : 0) |
+        (FD_ISSET(fd, s->w) ? SELECT_W : 0) |
+        (FD_ISSET(fd, s->x) ? SELECT_X : 0);
+}
+
+/* select() with a timeout in milliseconds; < 0 waits without limit. */
+static int fdsets_wait(fdsets *s, int maxfd, long ms)
+{
+    struct timeval tv, *tvp = NULL;
+    if (ms >= 0) {
+        tv.tv_sec = ms / 1000;
+        tv.tv_usec = (ms % 1000) * 1000;
+        tvp = &tv;
+    }
+    return select(maxfd + 1, s->r, s->w, s->x, tvp);
+}
+
 /* The loop proper: unix/cliloop.c's cli_main_loop, plus the wake pipe
  * and command queue. */
 static void *core_thread_main(void *arg)
@@ -199,30 +257,35 @@ static void *core_thread_main(void *arg)
     unsigned long now = GETTICKCOUNT();
     int *fdlist = NULL;
     size_t fdsize = 0;
-    pollwrapper *pw = pollwrap_new();
+    fdsets sets = { 0 };
 
     while (!stop_requested) {
         int rwx, ret, fdstate;
         unsigned long next;
 
-        pollwrap_clear(pw);
-        pollwrap_add_fd_rwx(pw, wake_pipe[0], SELECT_R);
-
         size_t nfds = 0;
+        int maxfd = wake_pipe[0];
         for (int fd = first_fd(&fdstate, &rwx); fd >= 0;
-             fd = next_fd(&fdstate, &rwx))
+             fd = next_fd(&fdstate, &rwx)) {
             nfds++;
+            if (fd > maxfd)
+                maxfd = fd;
+        }
         sgrowarray(fdlist, fdsize, nfds);
 
+        /* The sets are rebuilt before every wait: select() overwrites
+         * them with its results. */
+        fdsets_reset(&sets, maxfd);
+        fdsets_add(&sets, wake_pipe[0], SELECT_R);
         size_t fdcount = 0;
         for (int fd = first_fd(&fdstate, &rwx); fd >= 0;
              fd = next_fd(&fdstate, &rwx)) {
             fdlist[fdcount++] = fd;
-            pollwrap_add_fd_rwx(pw, fd, rwx);
+            fdsets_add(&sets, fd, rwx);
         }
 
         if (toplevel_callback_pending()) {
-            ret = pollwrap_poll_instant(pw);
+            ret = fdsets_wait(&sets, maxfd, 0);
         } else if (run_timers(now, &next)) {
             do {
                 unsigned long then;
@@ -241,27 +304,29 @@ static void *core_thread_main(void *arg)
                     overflow = true;
                 }
 
-                ret = pollwrap_poll_timeout(pw, ticks);
+                ret = fdsets_wait(&sets, maxfd, ticks);
                 if (ret == 0 && !overflow)
                     now = next;
                 else
                     now = GETTICKCOUNT();
-            } while (ret < 0 && errno == EINTR);
+                /* Not retried here on EINTR: select() leaves the sets
+                 * undefined, and the outer loop rebuilds them. */
+            } while (0);
         } else {
-            ret = pollwrap_poll_endless(pw);
+            ret = fdsets_wait(&sets, maxfd, -1);
         }
 
         if (ret < 0 && errno == EINTR)
             continue;
         if (ret < 0)
-            modalfatalbox("poll: %s", strerror(errno));
+            modalfatalbox("select: %s", strerror(errno));
 
-        if (pollwrap_check_fd_rwx(pw, wake_pipe[0], SELECT_R))
+        if (FD_ISSET(wake_pipe[0], sets.r))
             loop_drain_wake_pipe();
 
         for (size_t i = 0; i < fdcount; i++) {
             int fd = fdlist[i];
-            int fdrwx = pollwrap_get_fd_rwx(pw, fd);
+            int fdrwx = fdsets_get(&sets, fd);
             /* Exceptional before readable, or we may go straight past
              * the urgent marker (as cliloop). */
             if (fdrwx & SELECT_X)
@@ -279,7 +344,9 @@ static void *core_thread_main(void *arg)
         atomic_fetch_add(&loop_iterations, 1);
     }
 
-    pollwrap_free(pw);
+    sfree(sets.r);
+    sfree(sets.w);
+    sfree(sets.x);
     sfree(fdlist);
     return NULL;
 }
