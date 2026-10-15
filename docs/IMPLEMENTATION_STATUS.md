@@ -101,12 +101,15 @@ Swift 6.4 / CMake 4.4.3.
   Reset Terminal disabled (SwiftUI updates its items' state only when
   their menu opens) and macOS added "AutoFill"; the source menus are now
   updated first, the copies keep that state, and plug-ins are off.
+- **Clicked through by hand** (2026-10-16; Raw session to a local
+  server that turns on mouse reporting): in Compromise mode a plain
+  right-click goes to the application as a mouse report and opens no
+  menu; Change Settings from the Ctrl+right-click menu, Selection panel,
+  "Windows" and Apply: a plain right-click then opens the menu, and
+  nothing reaches the application, though it still has the mouse.
 
 **Limitations / not done**
 
-- Not clicked: a plain right-click opening the menu in Windows mouse
-  mode (unit-tested decision, `rightClickShowsMenu`), and Change
-  Settings applied from the context menu.
 - The Kerberos test needs Docker: CI's macOS runners skip it. GSSAPI
   delegation on the server side is not tested. X11 rows stay PARTIAL.
 - The fuzzing driver is not coverage-guided; a libFuzzer campaign with
