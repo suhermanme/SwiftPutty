@@ -28,6 +28,9 @@ public final class ConfigurationModel: Identifiable {
     public var sessionListWasLastFocused = false
     /// An error to show (PuTTY's `dlg_error_msg`).
     public var errorMessage: String?
+    /// The font setting whose chooser popover is open. The popover is
+    /// not the key window, so the dialog sends it Escape (not Cancel).
+    public var choosingFont: PuTTYKeyword?
 
     /// Change Settings on a running session (PuTTY's `midsession`):
     /// settings that only a new connection could use are not shown.

@@ -61,5 +61,41 @@ extension KitTests {
             #expect(model.port == 2222)
             #expect(model.settings["PortNumber"] == "2222")
         }
+
+        /// The font popover is not the key window, so Escape reaches the
+        /// dialog: it closes the popover, and only then cancels.
+        @Test func escapeClosesTheFontChooserBeforeCancelling() async throws {
+            let storage = TemporaryStore()
+            defer { storage.remove() }
+            let model = ConfigurationModel(store: storage.store)
+            var cancelled = false
+            let host = NSHostingView(rootView: ConfigurationView(model: model, onOpen: { _ in },
+                                                                 onCancel: { cancelled = true },
+                                                                 onAbout: {}))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 672),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            defer { window.close() }
+            window.layoutIfNeeded()
+            try? await Task.sleep(for: .milliseconds(100))
+
+            func escape() async {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                             timestamp: 0, windowNumber: window.windowNumber,
+                                             context: nil, characters: "\u{1B}",
+                                             charactersIgnoringModifiers: "\u{1B}",
+                                             isARepeat: false, keyCode: 53)!
+                _ = window.performKeyEquivalent(with: event)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            model.choosingFont = .fontName
+            try? await Task.sleep(for: .milliseconds(100))
+            await escape()
+            #expect(model.choosingFont == nil)
+            #expect(!cancelled)
+            await escape()
+            #expect(cancelled)
+        }
     }
 }

@@ -107,8 +107,43 @@ Swift 6.4 / CMake 4.4.3.
   menu; Change Settings from the Ctrl+right-click menu, Selection panel,
   "Windows" and Apply: a plain right-click then opens the menu, and
   nothing reaches the application, though it still has the mouse.
+- **Clicked through by hand: earlier milestones' leftovers** (2026-10-16;
+  Raw sessions to a local listener, SSH to `uppity`):
+  - M05 dialog: Tab goes Host Name, Port, saved-session name;
+    double-click in the session list opens the session; the font popover
+    (size stepper); Logging's Browse… save panel fills Log file name.
+  - M06: "always on top" (floating window level), Full screen on
+    Option-Return both ways, Dock bounce until activated on a bell in the
+    background, the colour picker (Modify… sets the RGB values; the
+    background changes on Apply), the character class table ('.' set to
+    class 1: double-click selects "foo", not "foo.bar"). Bell sounds not
+    heard.
+  - M07/M08: Change Settings applied mid-session; Tunnels: a local
+    forwarding added and used, then edited (Remove, new port, Add: the
+    old port closes, the new one forwards), a remote one (uppity listens)
+    and a dynamic one (SOCKS5 CONNECT through it); status column shows
+    Listening.
+  - M09/M12 panels: all 17 laid out without clipping; environment
+    variable added, kex order changed, terminal mode set, Telnet passive,
+    a manual host key, a bug workaround forced on, a key file chosen
+    with the open panel: all saved under PuTTY's keywords.
+  - **Fixed:** (1) resizing to rows x columns (Change Settings' Apply,
+    an application's resize request, a font change) left out the title
+    bar, as SwiftUI windows have a full-size content view, so the window
+    lost two or three rows; now sized from the window's margin around
+    the view. (2) With "always on top", Option-Return did nothing
+    (AppKit marks a floating window as unable to go full screen) and a
+    floating window in full screen could not leave it; the window now
+    goes full screen from the normal level, and is floating again when
+    it leaves. (3) Escape in a font popover went to the dialog's Cancel
+    (the popover is not the key window), closing the dialog or quitting
+    the app; it now closes the popover only.
 
 **Limitations / not done**
+
+- Full screen from the green button or View menu stays unavailable
+  while "always on top" is on (AppKit's rule for floating windows);
+  Option-Return works.
 
 - The Kerberos test needs Docker: CI's macOS runners skip it. GSSAPI
   delegation on the server side is not tested. X11 rows stay PARTIAL.
@@ -174,7 +209,7 @@ host, Xcode 27.0 / Swift 6.4 / CMake 4.4.3)
 
 - **Not clicked through by hand** in this milestone: the new panels,
   the context menu and the host CA window are covered by the tests
-  above only.
+  above only. (Since clicked through: see M13.)
 - **Command to run before connection** (`PreConnectCommand`) is not
   offered: it runs a local command and is left for M13's security review.
 - **Proxy password** is saved in the session file in plain text, as
@@ -351,6 +386,7 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
 - No manual check against the LAN server this milestone (it would need
   the test key in the server's `authorized_keys`).
 - New panels not clicked through by hand; checked by build and tests.
+  (Since clicked through: see M13.)
 
 ## M08 — SSH tunnels + live tunnel reconfiguration
 
@@ -417,7 +453,7 @@ forwarding (the H-1 pattern), shell alive and transport id unchanged.
 
 - The Tunnels sheet in the running app was build-checked and its pieces
   tested (model, controller staging, panel layout), not clicked through
-  by hand.
+  by hand. (Since clicked through against uppity: see M13.)
 - Staging is for edits (Remove-then-Add); PuTTY's single-step semantics
   apply otherwise, including keeping a refused remote forwarding
   configured. SSH-1 cannot cancel remote forwardings (upstream).
@@ -494,6 +530,7 @@ change.
 
 - The Change Settings sheet in the running app was build-checked and its
   pieces tested (model, controller, view), not clicked through by hand.
+  (Since clicked through: see M13.)
 - Tunnel editing and its staging, and the SSH panels (ciphers, kex,
   rekey limits) in the dialog, arrive with M08 and M09; until then those
   settings change only through saved sessions or tests.
@@ -576,6 +613,7 @@ keeps UTF-8, as upstream); `exit 3` reported as exit status 3.
   bounce, Option-Return, always-on-top, the colour picker, the character
   class table (logic and layout are tested; the terminal-side behaviour
   was checked against the LAN server through the bridge, above).
+  (Since clicked through, all but the bell sound: see M13.)
 - Not offered: GTK's Window/Fonts panel (separate bold and wide fonts,
   shadow bold), "When window is resized" (font-size resizing), scrollbar
   in full screen, "Allow variable-pitch fonts", Windows' mouse-button mode
@@ -668,6 +706,8 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
   focus, double-click in the list, the font popover, `NSSavePanel`, the
   Local Network prompt and opening a saved session against the LAN
   server through the window are not yet checked interactively.
+  (Since clicked through, except the Local Network prompt and the LAN
+  server: see M13.)
 - Panels not yet present: Keyboard, Bell, Features, Translation,
   Selection, Colours (M06); Proxy, SSH and its subpanels, Serial, Telnet,
   Rlogin, SUPDUP (M09, M11, M12); the environment variables list and the

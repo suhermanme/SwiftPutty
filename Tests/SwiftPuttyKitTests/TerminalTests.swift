@@ -320,6 +320,41 @@ extension KitTests {
             #expect(await normal.wait { $0.columns == 100 && $0.rows == 30 })
         }
 
+        /// SwiftUI's windows have a full-size content view: a resize to
+        /// rows x columns still leaves room for the title bar (it lost two
+        /// or three rows, also on Change Settings' Apply).
+        @Test func resizeKeepsTheTitleBarOutOfTheRows() async throws {
+            let term = try ScriptedTerminal()
+            defer { term.close() }
+            // As SwiftUI lays it out: under the title bar, in a view that
+            // fills the whole window.
+            term.window.styleMask.insert(.fullSizeContentView)
+            let container = NSView()
+            term.window.contentView = container
+            term.window.setContentSize(term.view.size(columns: 80, rows: 26))
+            term.view.frame = term.window.contentLayoutRect
+            term.view.autoresizingMask = [.width, .height]
+            container.addSubview(term.view)
+            #expect(term.window.frame.height > term.view.frame.height)
+            #expect(await term.wait { $0.columns == 80 })
+            term.view.terminal(term.controller, requestsResizeTo: 100, rows: 30)
+            #expect(await term.wait { $0.columns == 100 && $0.rows == 30 })
+            #expect(term.window.frame.height > term.view.frame.height)
+        }
+
+        /// AppKit will not take a floating window full screen: Option-Return
+        /// leaves "always on top" first.
+        @Test func optionReturnLeavesTheFloatingLevel() async throws {
+            let term = try ScriptedTerminal(settings: ["AlwaysOnTop": "1", "FullScreenOnAltEnter": "1"])
+            defer { term.close() }
+            #expect(await term.wait { $0.columns == 80 })
+            term.view.viewDidMoveToWindow()            // apply window options
+            #expect(term.window.level == .floating)
+            term.view.keyDown(with: keyEvent("\r", keyCode: 36, modifiers: .option, window: term.window))
+            #expect(term.window.level == .normal)
+            #expect(!term.window.collectionBehavior.contains(.fullScreenNone))
+        }
+
         @Test func sessionEndLeavesTheScreen() async throws {
             let term = try ScriptedTerminal()
             term.peer.send("goodbye\r\n")

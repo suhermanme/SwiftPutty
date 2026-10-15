@@ -318,7 +318,6 @@ struct WindowPanel: View {
 
 struct AppearancePanel: View {
     let model: ConfigurationModel
-    @State private var choosingFont = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -332,8 +331,8 @@ struct AppearancePanel: View {
                 HStack {
                     Text(FontSetting.describe(model.string(.fontName)))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button("Change…") { choosingFont = true }
-                        .popover(isPresented: $choosingFont, arrowEdge: .trailing) {
+                    Button("Change…") { model.choosingFont = .fontName }
+                        .popover(isPresented: model.choosingFontBinding(.fontName), arrowEdge: .trailing) {
                             FontChooser(fontName: Binding(get: { model.string(.fontName) },
                                                           set: { model.setString(.fontName, $0) }))
                         }
@@ -388,7 +387,6 @@ private struct FontRow: View {
     let label: String
     let keyword: PuTTYKeyword
     let optional: Bool
-    @State private var choosing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -398,8 +396,8 @@ private struct FontRow: View {
                 Text(optional && name.isEmpty ? "Not set (derived from the ordinary font)"
                                               : FontSetting.describe(name))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Change…") { choosing = true }
-                    .popover(isPresented: $choosing, arrowEdge: .trailing) {
+                Button("Change…") { model.choosingFont = keyword }
+                    .popover(isPresented: model.choosingFontBinding(keyword), arrowEdge: .trailing) {
                         FontChooser(fontName: Binding(
                             get: { name.isEmpty ? model.string(.fontName) : name },
                             set: { model.setString(keyword, $0) }))
@@ -410,6 +408,20 @@ private struct FontRow: View {
                 }
             }
         }
+    }
+}
+
+extension ConfigurationModel {
+    /// Whether the chooser for `keyword` is open, for `.popover`.
+    func choosingFontBinding(_ keyword: PuTTYKeyword) -> Binding<Bool> {
+        Binding(get: { self.choosingFont == keyword },
+                set: { isOpen in
+                    if isOpen {
+                        self.choosingFont = keyword
+                    } else if self.choosingFont == keyword {
+                        self.choosingFont = nil
+                    }
+                })
     }
 }
 

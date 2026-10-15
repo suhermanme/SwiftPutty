@@ -290,13 +290,16 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     }
 
     /// Resize the window to hold `columns` x `rows`, keeping its top-left
-    /// corner.
+    /// corner. The window keeps its margin around this view: SwiftUI
+    /// windows have a full-size content view, so `frameRect(forContentRect:)`
+    /// would leave out the title bar.
     private func resizeWindow(columns: Int, rows: Int) {
         guard let window, columns > 0, rows > 0 else { return }
         var frame = window.frame
-        let content = window.frameRect(forContentRect: NSRect(origin: .zero, size: size(columns: columns, rows: rows)))
-        frame.origin.y += frame.height - content.height
-        frame.size = content.size
+        let wanted = size(columns: columns, rows: rows)
+        let height = wanted.height + frame.height - bounds.height
+        frame.origin.y += frame.height - height
+        frame.size = NSSize(width: wanted.width + frame.width - bounds.width, height: height)
         window.setFrame(frame, display: true)
     }
 
@@ -393,6 +396,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     /// Full screen changes the scrollbar ("Display scrollbar in full
     /// screen mode") and, with "only when maximised", the font.
     @objc private func windowFullScreenChanged(_ notification: Notification) {
+        applyWindowOptions()
         scroller.isHidden = !showsScrollbar
         setFrameSize(frame.size)
         needsDisplay = true
@@ -433,6 +437,13 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if options.fullScreenOnOptionReturn, event.keyCode == 36,
            flags.intersection([.option, .command, .control, .shift]) == .option {
+            // A floating window ("always on top") is marked as unable to go
+            // full screen; it goes from the normal level, and "always on
+            // top" comes back when it leaves.
+            if let window, !window.styleMask.contains(.fullScreen), options.resizeAction != 1 {
+                window.level = .normal
+                window.collectionBehavior.remove(.fullScreenNone)
+            }
             window?.toggleFullScreen(nil)
             return
         }
@@ -711,7 +722,8 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
 
     private func applyWindowOptions() {
         guard let window else { return }
-        window.level = options.alwaysOnTop ? .floating : .normal
+        // A floating window in full screen cannot leave it.
+        window.level = options.alwaysOnTop && !window.styleMask.contains(.fullScreen) ? .floating : .normal
         // "Forbid resizing completely": no resizing, zooming or full screen.
         if options.resizeAction == 1 {
             window.styleMask.remove(.resizable)

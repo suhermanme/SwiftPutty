@@ -154,7 +154,12 @@ public struct ConfigurationView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
+                    .keyboardShortcut(model.choosingFont == nil ? .cancelAction : nil)
+                if model.choosingFont != nil {
+                    Button("") { model.choosingFont = nil }
+                        .keyboardShortcut(.cancelAction)
+                        .hidden()
+                }
             }
             .padding(12)
         }
