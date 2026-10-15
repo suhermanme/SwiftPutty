@@ -44,6 +44,17 @@
   the model as `shows(_:)`, tested).
 - Fixed-point edit boxes format as config.c does (`%g`), which stop bits
   (denominator 2) need.
+- **Clicked through by hand** (Debug app; screenshots checked): SSH /
+  Serial / Other: Telnet radio buttons; Serial turns the boxes into
+  "Serial line" and "Speed" (9600), the device menu lists
+  `/dev/cu.Bluetooth-Incoming-Port` and fills the line; the Serial,
+  Telnet, Rlogin and SUPDUP panels with PuTTY's defaults; Other: Telnet
+  moves the port to 23. A Telnet session to a local test peer: greeting
+  shown, server echo (text appears once), typing sent character by
+  character, Return as CR LF; Special Commands lists Telnet's commands
+  and "Are You There" reaches the peer (IAC 246); Change Settings lists
+  Connection > Telnet only, with just the two live options, and turning
+  off Telnet New Line makes Return send CR NUL at once.
 
 **Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
 host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
@@ -67,7 +78,6 @@ host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
   itself, not against real servers (none is installed here).
 - Errors from a live serial reconfiguration are discarded, as upstream
   does (its FIXME); the Event Log shows what was configured.
-- The configuration dialog's new panels were not clicked through by hand.
 - Connection/Proxy and the Data panel's environment variables remain
   (M12).
 
