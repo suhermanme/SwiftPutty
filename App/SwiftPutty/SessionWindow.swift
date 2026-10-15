@@ -247,11 +247,23 @@ final class WeakWindow {
 /// copies of the menu bar's own items (so they act on this window), in
 /// GTK's order: New Session, the Session menu, Copy / Paste / Copy All,
 /// About.
+///
+/// SwiftUI sets its menu items' enabled state only when their menu is
+/// about to open, so each source menu is brought up to date first and
+/// the copies keep the state they were copied with (validating them
+/// again would ask a target that does not know this window's session).
 enum SessionContextMenu {
     @MainActor
     static func make() -> NSMenu? {
         guard let main = NSApp.mainMenu else { return nil }
         let menu = NSMenu(title: "SwiftPutty")
+        menu.autoenablesItems = false
+        // No "AutoFill" or Services plug-ins: this is the window menu.
+        menu.allowsContextMenuPlugIns = false
+        for source in main.items.compactMap(\.submenu) {
+            source.delegate?.menuNeedsUpdate?(source)
+            source.update()
+        }
         func add(_ item: NSMenuItem?) {
             if let copy = item?.copy() as? NSMenuItem { menu.addItem(copy) }
         }

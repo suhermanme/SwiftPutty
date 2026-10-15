@@ -84,8 +84,29 @@ Swift 6.4 / CMake 4.4.3.
 | App Debug build; Release build, universal | PASS |
 | `scripts/verify-upstream.sh` (network) | PASS: good signature by PuTTY's release key; archive identical to `Vendor/putty` |
 
+- **Clicked through by hand** (Debug app, driven by AppleScript UI
+  scripting, screenshots checked; 2026-10-15): Connection panel's
+  pre-connect command saved, and run before a real connection (marker
+  file written); the proxy password saved to the keychain and absent
+  from the sessions file, reloaded after relaunch; the GSSAPI list's
+  macOS names; manual host keys (invalid key and duplicate refused with
+  PuTTY's messages); the host CA window (bad key refused with the live
+  "Cannot decode key" line, a bad expression refused with the parser's
+  message, save and delete); Copy All with Copy as RTF on: plain text
+  and RTF on the pasteboard, pasted into TextEdit with colours,
+  underline and background; Ctrl+right-click opens the window menu,
+  and its items act on the session (New Session, Event Log); closing a
+  connected session asks first. **Fixed:** the context menu showed
+  Duplicate Session, Change Settings, Event Log, Clear Scrollback and
+  Reset Terminal disabled (SwiftUI updates its items' state only when
+  their menu opens) and macOS added "AutoFill"; the source menus are now
+  updated first, the copies keep that state, and plug-ins are off.
+
 **Limitations / not done**
 
+- Not clicked: a plain right-click opening the menu in Windows mouse
+  mode (unit-tested decision, `rightClickShowsMenu`), and Change
+  Settings applied from the context menu.
 - The Kerberos test needs Docker: CI's macOS runners skip it. GSSAPI
   delegation on the server side is not tested. X11 rows stay PARTIAL.
 - The fuzzing driver is not coverage-guided; a libFuzzer campaign with
