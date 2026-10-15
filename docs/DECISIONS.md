@@ -595,3 +595,23 @@ exercises (H-1, H-2).
 forwarding. Forwarding semantics, including PuTTY's "a refused remote
 forwarding stays configured and is requested again on the next change",
 stay upstream's.
+
+## D-033 — SSH authentication: upstream does it all; tests use uppity's key options
+
+**Status:** Accepted (M09)
+**Context:** Public-key authentication, passphrases, the agent, banners
+and algorithm preferences are all implemented by PuTTY's SSH code and
+need only settings and the terminal (where PuTTY asks for passphrases).
+D-009 planned an unprivileged OpenSSH `sshd` for key tests.
+**Decision:** No bridge changes. The SSH sub-panels follow config.c
+(Kex, Host keys, Cipher with Up/Down preference lists, Auth, Credentials,
+GSSAPI, TTY, X11, Bugs, More bugs) with config.c's mid-session rules.
+"Attempt authentication using Pageant" reads "SSH agent": on macOS the
+agent is the one at `SSH_AUTH_SOCK`, which PuTTY's Unix code already
+uses. Key tests use uppity, not `sshd`: `spb_ssh_fixture` passes options
+after `--` to it (`--userkey`, `--deny-auth`, `--bannertext`), and test
+user keys made with upstream `puttygen` are committed (not secret).
+**Consequences:** Key authentication is tested offline in CI. GSSAPI is
+not usable on macOS as upstream stands (its Unix loader looks for `.so`
+names); agent, agent forwarding and X11 forwarding are configurable but
+not yet tested end to end.

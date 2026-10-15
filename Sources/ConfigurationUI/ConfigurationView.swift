@@ -9,7 +9,8 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
     case session, logging
     case terminal, keyboard, bell, features
     case window, appearance, behaviour, translation, selection, copy, colours
-    case connection, data, ssh, tunnels
+    case connection, data, ssh, kex, hostKeys, cipher, auth, credentials, gssapi, tty, x11, tunnels
+    case bugs, moreBugs
 
     public var id: Self { self }
 
@@ -32,14 +33,25 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .connection: "Connection"
         case .data: "Data"
         case .ssh: "SSH"
+        case .kex: "Kex"
+        case .hostKeys: "Host keys"
+        case .cipher: "Cipher"
+        case .auth: "Auth"
+        case .credentials: "Credentials"
+        case .gssapi: "GSSAPI"
+        case .tty: "TTY"
+        case .x11: "X11"
         case .tunnels: "Tunnels"
+        case .bugs: "Bugs"
+        case .moreBugs: "More bugs"
         }
     }
 
     /// Nesting depth in the tree.
     public var depth: Int {
         switch self {
-        case .copy, .tunnels: 2
+        case .copy, .kex, .hostKeys, .cipher, .auth, .tty, .x11, .tunnels, .bugs, .moreBugs: 2
+        case .credentials, .gssapi: 3
         case .session, .terminal, .window, .connection: 0
         default: 1
         }
@@ -65,6 +77,16 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .data: "Data to send to the server"
         case .ssh: "Options controlling SSH connections"
         case .tunnels: "Options controlling SSH port forwarding"
+        case .kex: "Options controlling SSH key exchange"
+        case .hostKeys: "Options controlling SSH host keys"
+        case .cipher: "Options controlling SSH encryption"
+        case .auth: "Options controlling SSH authentication"
+        case .credentials: "Credentials to authenticate with"
+        case .gssapi: "Options controlling GSSAPI authentication"
+        case .tty: "Remote terminal settings"
+        case .x11: "Options controlling SSH X11 forwarding"
+        case .bugs: "Workarounds for SSH server bugs"
+        case .moreBugs: "Further workarounds for SSH server bugs"
         }
     }
 }
@@ -157,6 +179,12 @@ public struct ConfigurationView: View {
         case .data: return false
         // DISPLAY_RECONFIGURABLE_PROTOCOL: SSH panels for SSH sessions.
         case .ssh, .tunnels: return model.connectionType == "ssh"
+        // Re-keying makes these meaningful mid-session, except on SSH-1
+        // or a connection-sharing downstream.
+        case .kex, .hostKeys, .cipher:
+            return model.connectionType == "ssh" && model.protocolInfo != 1 && model.protocolInfo != -1
+        // Only a new connection uses these.
+        case .auth, .credentials, .gssapi, .tty, .x11, .bugs, .moreBugs: return false
         default: return true
         }
     }
@@ -181,6 +209,16 @@ public struct ConfigurationView: View {
         case .data: DataPanel(model: model)
         case .ssh: SSHPanel(model: model)
         case .tunnels: TunnelsPanel(model: model)
+        case .kex: KexPanel(model: model)
+        case .hostKeys: HostKeysPanel(model: model)
+        case .cipher: CipherPanel(model: model)
+        case .auth: AuthPanel(model: model)
+        case .credentials: CredentialsPanel(model: model)
+        case .gssapi: GSSAPIPanel(model: model)
+        case .tty: TTYPanel(model: model)
+        case .x11: X11Panel(model: model)
+        case .bugs: BugsPanel(model: model)
+        case .moreBugs: MoreBugsPanel(model: model)
         }
     }
 }

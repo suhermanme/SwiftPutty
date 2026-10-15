@@ -18,8 +18,8 @@ Milestones **M00** (analysis and architecture), **M01** (build skeleton
 and PuTTY core integration), **M02** (session executor and event loop),
 **M03** (terminal rendering foundation), **M04** (basic SSH session),
 **M05** (saved sessions and configuration dialog), **M06** (terminal
-parity), **M07** (live Change Settings) and **M08** (SSH tunnels, changed
-live) are complete. The app starts
+parity), **M07** (live Change Settings), **M08** (SSH tunnels, changed
+live) and **M09** (SSH authentication and the SSH panels) are complete. The app starts
 with PuTTY's configuration dialog (Session, Logging, Terminal with
 Keyboard / Bell / Features, Window with Appearance / Behaviour /
 Translation / Selection / Colours, Connection and Data; saved sessions

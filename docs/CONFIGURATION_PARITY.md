@@ -21,7 +21,7 @@ reconfigure handlers (`term_reconfig`, `ldisc_configure`, `log_reconfig`,
 
 Every row was NOT STARTED at M00; M05 added the configuration dialog
 (D-028), M06 the terminal and window panels, and M07 Change Settings on a
-running session (D-031): "runtime" rows take effect at once, others are
+running session (D-031), M08 tunnels and M09 the remaining SSH panels: "runtime" rows take effect at once, others are
 hidden mid-session as in PuTTY. PARTIAL rows are limited as noted. For
 NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 `CONF_x` = PuTTY Conf key. Saved keyword = `conf.h` `SAVE_KEYWORD`.
@@ -231,51 +231,51 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Kex algorithm order (`CONF_ssh_kexlist`) | Reorderable list with warn-below separator | NOT STARTED | future | Shown mid-session (SSH-2); used at the next rekey |
-| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | NOT STARTED | future | macOS GSS: `unix/gss.c` dlopen; feasibility TBD (M09) |
-| Max minutes before rekey (`CONF_ssh_rekey_time`) | Number field | NOT STARTED | runtime | May rekey immediately if shortened |
-| Minutes between GSS checks (`CONF_gssapirekey`) | Number field | NOT STARTED | runtime | |
-| Max data before rekey (`CONF_ssh_rekey_data`) | Text field (e.g. `1G`) | NOT STARTED | runtime | |
-| Host key algorithm order (`CONF_ssh_hklist`) | Reorderable list | NOT STARTED | future | Next rekey |
-| Prefer algorithms with known host key (`CONF_ssh_prefer_known_hostkeys`) | Checkbox | NOT STARTED | future | Next rekey |
+| Kex algorithm order (`CONF_ssh_kexlist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | future | Shown mid-session (SSH-2); used at the next rekey. Used at the next key exchange |
+| Attempt GSSAPI key exchange (`CONF_try_gssapi_kex`) | Checkbox | PARTIAL | future | macOS GSS: `unix/gss.c` dlopen; feasibility TBD (M09). Saved and passed to PuTTY; upstream's Unix GSSAPI loader looks for .so library names that macOS lacks, so GSSAPI is unavailable (decide in M13/M15) |
+| Max minutes before rekey (`CONF_ssh_rekey_time`) | Number field | COMPLETE | runtime | May rekey immediately if shortened |
+| Minutes between GSS checks (`CONF_gssapirekey`) | Number field | COMPLETE | runtime | |
+| Max data before rekey (`CONF_ssh_rekey_data`) | Text field (e.g. `1G`) | COMPLETE | runtime | |
+| Host key algorithm order (`CONF_ssh_hklist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | future | Next rekey |
+| Prefer algorithms with known host key (`CONF_ssh_prefer_known_hostkeys`) | Checkbox | COMPLETE | future | Next rekey |
 | Manually configured host keys (`CONF_ssh_manual_hostkeys`) | List + Add/Remove | NOT STARTED | reconnect | |
 | Configure host CAs | Separate CA manager window (`host_ca_*` storage API) | NOT STARTED | runtime | Global store, not per-session; button shown mid-session |
-| Cipher order (`CONF_ssh_cipherlist`) | Reorderable list | NOT STARTED | runtime | Change forces a rekey |
-| Enable legacy single-DES (`CONF_ssh2_des_cbc`) | Checkbox | NOT STARTED | runtime | Forces a rekey |
+| Cipher order (`CONF_ssh_cipherlist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | runtime | Change forces a rekey. Change forces a rekey (tested live, M07) |
+| Enable legacy single-DES (`CONF_ssh2_des_cbc`) | Checkbox | COMPLETE | runtime | Forces a rekey |
 
 ## Connection → SSH → Auth (+ Credentials, GSSAPI)
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Display pre-auth banner (`CONF_ssh_show_banner`) | Checkbox | NOT STARTED | reconnect | |
-| Bypass authentication (`CONF_ssh_no_userauth`) | Checkbox | NOT STARTED | reconnect | |
-| Disconnect if trivial auth (`CONF_ssh_no_trivial_userauth`) | Checkbox | NOT STARTED | reconnect | |
-| Attempt auth using Pageant (`CONF_tryagent`) | Checkbox "Attempt authentication using SSH agent" | NOT STARTED | reconnect | Uses `SSH_AUTH_SOCK` (macOS/OpenSSH agent). Pageant pipe N/A |
-| Attempt TIS/CryptoCard (SSH-1) (`CONF_try_tis_auth`) | Checkbox (legacy) | NOT STARTED | reconnect | |
-| Attempt keyboard-interactive (`CONF_try_ki_auth`) | Checkbox | NOT STARTED | reconnect | |
-| Allow agent forwarding (`CONF_agentfwd`) | Checkbox | NOT STARTED | reconnect | |
-| Allow username changes (`CONF_change_username`) | Checkbox | NOT STARTED | reconnect | |
-| Private key file (`CONF_keyfile`) | NSOpenPanel; security-scoped bookmark if sandboxed | NOT STARTED | reconnect | PPK + OpenSSH formats via upstream |
-| Certificate (`CONF_detached_cert`) | NSOpenPanel | NOT STARTED | reconnect | |
-| Authentication plugin (`CONF_auth_plugin`) | Text field | NOT STARTED | reconnect | Runs a local command; review in M13 |
-| Attempt GSSAPI auth (`CONF_try_gssapi_auth`) | Checkbox | NOT STARTED | reconnect | |
-| Allow GSSAPI delegation (`CONF_gssapifwd`) | Checkbox | NOT STARTED | reconnect | |
-| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list + path | NOT STARTED | reconnect | Depends on Unix GSS libs on macOS |
+| Display pre-auth banner (`CONF_ssh_show_banner`) | Checkbox | COMPLETE | reconnect | Tested against uppity (M09) |
+| Bypass authentication (`CONF_ssh_no_userauth`) | Checkbox | COMPLETE | reconnect | |
+| Disconnect if trivial auth (`CONF_ssh_no_trivial_userauth`) | Checkbox | COMPLETE | reconnect | |
+| Attempt auth using Pageant (`CONF_tryagent`) | Checkbox "Attempt authentication using SSH agent" | PARTIAL | reconnect | Uses `SSH_AUTH_SOCK` (macOS/OpenSSH agent). Pageant pipe N/A. Not yet tested with an agent holding a key |
+| Attempt TIS/CryptoCard (SSH-1) (`CONF_try_tis_auth`) | Checkbox (legacy) | COMPLETE | reconnect | |
+| Attempt keyboard-interactive (`CONF_try_ki_auth`) | Checkbox | COMPLETE | reconnect | Tested against uppity (M04) |
+| Allow agent forwarding (`CONF_agentfwd`) | Checkbox | PARTIAL | reconnect | Setting only; forwarding not yet tested |
+| Allow username changes (`CONF_change_username`) | Checkbox | COMPLETE | reconnect | |
+| Private key file (`CONF_keyfile`) | Edit box + Browse… (NSOpenPanel) | COMPLETE | reconnect | PPK + OpenSSH formats via upstream. PPK files (upstream; OpenSSH keys must be converted with puttygen, as in PuTTY). Unencrypted and passphrase-protected keys tested against uppity (M09); the passphrase is asked in the terminal |
+| Certificate (`CONF_detached_cert`) | Edit box + Browse… | COMPLETE | reconnect | |
+| Authentication plugin (`CONF_auth_plugin`) | Edit box | COMPLETE | reconnect | Runs a local command; review in M13. Runs a local command; review in M13 |
+| Attempt GSSAPI auth (`CONF_try_gssapi_auth`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
+| Allow GSSAPI delegation (`CONF_gssapifwd`) | Checkbox | PARTIAL | reconnect | See GSSAPI key exchange |
+| GSSAPI library preference / custom path (`CONF_ssh_gsslist`, `CONF_ssh_gss_custom`) | Reorderable list + path with Browse… | PARTIAL | reconnect | Depends on Unix GSS libs on macOS. See GSSAPI key exchange |
 
 ## Connection → SSH → TTY / X11 / Tunnels / Bugs
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Don't allocate a pty (`CONF_nopty`) | Checkbox | NOT STARTED | reconnect | |
-| Terminal modes (`CONF_ttymodes`) | Table Auto/Nothing/value | NOT STARTED | reconnect | |
-| Enable X11 forwarding (`CONF_x11_forward`) | Checkbox | NOT STARTED | reconnect | Works with XQuartz `DISPLAY` |
-| X display location (`CONF_x11_display`) | Text field | NOT STARTED | reconnect | |
-| Remote X11 auth protocol (`CONF_x11_auth`) | Radio MIT-Magic-Cookie-1 / XDM-Authorization-1 | NOT STARTED | reconnect | |
-| X authority file (`CONF_xauthfile`) | File chooser | NOT STARTED | reconnect | |
+| Don't allocate a pty (`CONF_nopty`) | Checkbox | COMPLETE | reconnect | |
+| Terminal modes (`CONF_ttymodes`) | List + Auto / Nothing / This: + Set, as config.c | COMPLETE | reconnect | |
+| Enable X11 forwarding (`CONF_x11_forward`) | Checkbox | PARTIAL | reconnect | Works with XQuartz `DISPLAY`. Setting only; needs a local X server (XQuartz), not yet tested |
+| X display location (`CONF_x11_display`) | Text field | PARTIAL | reconnect | As above |
+| Remote X11 auth protocol (`CONF_x11_auth`) | Radio MIT-Magic-Cookie-1 / XDM-Authorization-1 | PARTIAL | reconnect | As above |
+| X authority file (`CONF_xauthfile`) | Edit box + Browse… | PARTIAL | reconnect | As above |
 | **Local ports accept connections from other hosts (`CONF_lport_acceptall`)** | Checkbox | COMPLETE | future | Read by `pfl_listen` only when a listener is *created*; existing listeners keep their bind |
 | **Remote ports do the same (`CONF_rport_acceptall`)** | Checkbox | COMPLETE | future | Used only for *newly requested* remote forwards with no explicit bind address |
 | **Forwarded ports list (`CONF_portfwd`)** — add/remove L, R, D, Auto/IPv4/IPv6, optional bind address | config.c's list, Remove (fills the fields) / Add; mid-session each row shows its live state (Listening / Failed / Requested / Enabled / Refused / Duplicate) | COMPLETE | **runtime** | `portfwdmgr_config` (patch 0006 for status). Remove-then-Add is an edit, staged (ARCHITECTURE §6.4, D-032): a failed change keeps the old forwarding. A second remote forwarding on the same server port is refused before Apply (H-2). SSH-1: remote removal unsupported upstream |
-| SSH server bug workarounds (`CONF_sshbug_*`, 15 keys) | Popup Auto/Off/On each | NOT STARTED | reconnect | |
+| SSH server bug workarounds (`CONF_sshbug_*`, 15 keys) | Drop-downs Auto / Off / On (Off / On for the two manual ones), Bugs and More bugs panels as config.c | COMPLETE | reconnect | 16 keys in 0.85 |
 
 ## Connection → Serial
 

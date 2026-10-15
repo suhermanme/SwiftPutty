@@ -281,6 +281,35 @@ struct ConfigurationTests {
         #expect(PuTTYSettings.canonicalCharacterSet("KOI8-R") == "KOI8-R")
     }
 
+    @Test func preferenceListsReorderAsPuTTYsDraglist() {
+        let f = Fixture()
+        #expect(f.model.preferenceList(.cipher) == ["aes", "chacha20", "aesgcm", "3des", "WARN",
+                                                    "des", "blowfish", "arcfour"])
+        f.model.movePreference(.cipher, at: 1, by: -1)
+        #expect(f.model.preferenceList(.cipher).prefix(2) == ["chacha20", "aes"])
+        // PuTTY reads and saves the new order.
+        #expect(f.model.settings.normalised()["Cipher"] == f.model.settings["Cipher"])
+        f.model.movePreference(.cipher, at: 0, by: -1)
+        #expect(f.beeps == 1)
+        f.model.movePreference(.kex, at: 0, by: 1)
+        #expect(f.model.settings.normalised()["KEX"]?.hasPrefix("mlkem-curve25519,ntru-curve25519") == true)
+    }
+
+    @Test func terminalModesAsConfigC() {
+        let f = Fixture()
+        #expect(f.model.terminalModes.first?.mode == "CS7")
+        #expect(f.model.terminalModes.allSatisfy { $0.value == "A" })
+        f.model.setTerminalModes(["ERASE", "INTR"], kind: "V", text: "^C")
+        f.model.setTerminalModes(["ECHO"], kind: "N", text: "")
+        let modes = Dictionary(uniqueKeysWithValues: f.model.terminalModes.map { ($0.mode, $0.value) })
+        #expect(modes["INTR"] == "V^C" && modes["ECHO"] == "N" && modes["ICANON"] == "A")
+        #expect(ConfigurationModel.describeTerminalMode("A") == "(auto)")
+        #expect(ConfigurationModel.describeTerminalMode("N") == "(don't send)")
+        #expect(ConfigurationModel.describeTerminalMode("V^C") == "^C")
+        let saved = f.model.settings.normalised()["TerminalModes"] ?? ""
+        #expect(saved.contains("INTR=V^C") && saved.contains("ECHO=N"))
+    }
+
     @Test func atoiIsCs() {
         #expect(ConfigurationModel.atoi("") == 0)
         #expect(ConfigurationModel.atoi(" 42abc") == 42)

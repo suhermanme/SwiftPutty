@@ -2,6 +2,7 @@
  * spb_ssh_fixture - a local SSH server for tests (docs/TESTING.md, D-009).
  *
  *   spb_ssh_fixture <uppity> <hostkey.ppk> <workdir> [--port N]
+ *                   [-- <more uppity options>]
  *
  * Runs upstream PuTTY's test server, uppity, on a Unix-domain socket in
  * <workdir>, and relays TCP connections on 127.0.0.1 to it. (uppity only
@@ -86,13 +87,22 @@ static void *relay(void *arg)
 
 int main(int argc, char **argv)
 {
-    if (argc != 4 && !(argc == 6 && !strcmp(argv[4], "--port"))) {
+    /* Options after "--" are passed on to uppity (e.g. --userkey,
+     * --deny-auth, --bannertext). */
+    int nargs = argc, extra = argc;
+    for (int i = 4; i < argc; i++)
+        if (!strcmp(argv[i], "--")) {
+            nargs = i;
+            extra = i + 1;
+            break;
+        }
+    if (nargs != 4 && !(nargs == 6 && !strcmp(argv[4], "--port"))) {
         fprintf(stderr, "usage: %s <uppity> <hostkey.ppk> <workdir> "
-                "[--port N]\n", argv[0]);
+                "[--port N] [-- <uppity options>]\n", argv[0]);
         return 2;
     }
     const char *uppity = argv[1], *hostkey = argv[2], *workdir = argv[3];
-    int port = argc == 6 ? atoi(argv[5]) : 0;
+    int port = nargs == 6 ? atoi(argv[5]) : 0;
     signal(SIGPIPE, SIG_IGN);
 
     snprintf(socket_path, sizeof(socket_path), "%s/uppity.sock", workdir);
@@ -120,8 +130,19 @@ int main(int argc, char **argv)
         dup2(devnull, STDOUT_FILENO);
         if (logfd >= 0)
             dup2(logfd, STDERR_FILENO);  /* uppity's notes, for debugging */
-        execl(uppity, uppity, "--listen", socket_path, "--hostkey", hostkey,
-              "--sessiondir", workdir, (char *)NULL);
+        char *args[64];
+        int n = 0;
+        args[n++] = (char *)uppity;
+        args[n++] = "--listen";
+        args[n++] = socket_path;
+        args[n++] = "--hostkey";
+        args[n++] = (char *)hostkey;
+        args[n++] = "--sessiondir";
+        args[n++] = (char *)workdir;
+        for (int i = extra; i < argc && n < 63; i++)
+            args[n++] = argv[i];
+        args[n] = NULL;
+        execv(uppity, args);
         perror("exec uppity");
         _exit(127);
     }

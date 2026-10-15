@@ -386,6 +386,54 @@ public final class ConfigurationModel: Identifiable {
         return false
     }
 
+    // MARK: SSH panels (M09)
+
+    /// A comma-separated preference list (`Cipher`, `KEX`, `HostKey`,
+    /// `GSSLibs`): PuTTY's draglist, with "WARN" the warn-below line.
+    public func preferenceList(_ keyword: PuTTYKeyword) -> [String] {
+        string(keyword).split(separator: ",").map(String.init)
+    }
+
+    /// The draglist's Up / Down buttons.
+    public func movePreference(_ keyword: PuTTYKeyword, at index: Int, by offset: Int) {
+        var list = preferenceList(keyword)
+        let target = index + offset
+        guard list.indices.contains(index), list.indices.contains(target) else {
+            beep()
+            return
+        }
+        list.swapAt(index, target)
+        setString(keyword, list.joined(separator: ","))
+    }
+
+    /// The `TerminalModes` map: mode name to "A" (auto), "N" (don't
+    /// send) or "V<value>", in PuTTY's order.
+    public var terminalModes: [(mode: String, value: String)] {
+        string(.terminalModes).split(separator: ",").compactMap { entry in
+            let parts = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard let mode = parts.first else { return nil }
+            return (String(mode), parts.count > 1 ? String(parts[1]) : "")
+        }
+    }
+
+    /// config.c ttymodes_handler's list text.
+    public static func describeTerminalMode(_ value: String) -> String {
+        switch value.first {
+        case "A": "(auto)"
+        case "N": "(don't send)"
+        default: String(value.dropFirst())
+        }
+    }
+
+    /// The Set button: `kind` "A", "N" or "V" (with `text`) for each mode.
+    public func setTerminalModes(_ modes: Set<String>, kind: Character, text: String) {
+        let value = kind == "V" ? "V" + text : String(kind)
+        let updated = terminalModes.map { entry in
+            modes.contains(entry.mode) ? (entry.mode, value) : entry
+        }
+        setString(.terminalModes, updated.map { "\($0.0)=\($0.1)" }.joined(separator: ","))
+    }
+
     // MARK: Formats of the Terminal and Window panels (M06)
 
     /// "Initial state of numeric keypad" (`numeric_keypad_handler`): one

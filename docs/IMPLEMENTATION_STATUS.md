@@ -11,7 +11,7 @@
 | **M06** | Terminal parity | **COMPLETE** (2026-10-15) |
 | **M07** | Live session reconfiguration framework | **COMPLETE** (2026-10-15) |
 | **M08** | SSH tunnels + live tunnel reconfiguration | **COMPLETE** (2026-10-15) |
-| M09 | SSH authentication and connection parity | NOT STARTED |
+| **M09** | SSH authentication and connection parity | **COMPLETE** (2026-10-15) |
 | M10 | Event log and session operations | NOT STARTED |
 | M11 | Additional PuTTY backends | NOT STARTED |
 | M12 | Configuration parity pass | NOT STARTED |
@@ -20,6 +20,48 @@
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M09 — SSH authentication and connection parity
+
+**Delivered**
+
+- **Public-key authentication** from PPK files, unencrypted or with a
+  passphrase (asked in the terminal, as PuTTY does), the pre-auth banner,
+  and the other authentication options, all through upstream code (D-033).
+- **The remaining SSH panels**, as config.c: Kex, Host keys and Cipher
+  (preference lists with Up / Down and the warn-below line; rekey limits;
+  shown mid-session for SSH-2), Auth, Credentials (key file and
+  certificate with Browse…, auth plugin), GSSAPI, TTY (no pty; terminal
+  modes with Auto / Nothing / This: and Set), X11, Bugs and More bugs.
+  The tree is now PuTTY's full SSH subtree.
+- **Test fixture**: `spb_ssh_fixture` passes options to uppity; test user
+  keys (`Core/tests/fixtures/userkey*.ppk`, `userkey.pub`) made with
+  upstream `puttygen`, committed, not secret.
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, x86_64
+host, Xcode 26.6 / Swift 6.3.3 / CMake 4.4.4)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo) | CLEAN_CORE |
+| C tests (`spb_ssh_test` adds key-only uppity: key login with banner, passphrase key wrong then right with banner off, no key refused) | CLEAN_C |
+| `leaks --atExit`: all four C test programs | CLEAN_LEAKS |
+| C tests under ASan + UBSan / TSan (Debug) | CLEAN_SAN |
+| `swift test` (96 tests, 18 suites; new: preference lists, terminal modes; every new panel keyword checked against PuTTY's saved settings) | CLEAN_SWIFT |
+| `swift test --sanitize=address` / `--sanitize=thread` | CLEAN_SWIFT_SAN |
+| App Debug build; Release build, universal | CLEAN_APP |
+
+**Limitations / not done**
+
+- Not tested end to end: authentication through an SSH agent, agent
+  forwarding, X11 forwarding (needs XQuartz). The settings reach PuTTY.
+- GSSAPI is unavailable on macOS as upstream stands (its Unix library
+  loader looks for `.so` names); the settings are kept (M13/M15).
+- Manually configured host keys and the host CA manager are not done
+  (M12).
+- No manual check against the LAN server this milestone (it would need
+  the test key in the server's `authorized_keys`).
+- New panels not clicked through by hand; checked by build and tests.
 
 ## M08 — SSH tunnels + live tunnel reconfiguration
 

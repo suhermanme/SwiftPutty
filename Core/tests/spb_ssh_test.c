@@ -78,7 +78,9 @@ static void fixture_paths(const char **fixture, const char **uppity)
     }
 }
 
-static fixture fixture_start(const char *hostkey, int port)
+/* extra: NULL-terminated uppity options, or NULL. */
+static fixture fixture_start_with(const char *hostkey, int port,
+                                  const char *const *extra)
 {
     const char *fixture_bin, *uppity_bin;
     fixture_paths(&fixture_bin, &uppity_bin);
@@ -97,12 +99,23 @@ static fixture fixture_start(const char *hostkey, int port)
         dup2(out[1], STDOUT_FILENO);
         close(in[1]);
         close(out[0]);
-        if (port)
-            execl(fixture_bin, fixture_bin, uppity_bin, key, workdir,
-                  "--port", portstr, (char *)NULL);
-        else
-            execl(fixture_bin, fixture_bin, uppity_bin, key, workdir,
-                  (char *)NULL);
+        const char *args[64];
+        int n = 0;
+        args[n++] = fixture_bin;
+        args[n++] = uppity_bin;
+        args[n++] = key;
+        args[n++] = workdir;
+        if (port) {
+            args[n++] = "--port";
+            args[n++] = portstr;
+        }
+        if (extra && *extra) {
+            args[n++] = "--";
+            while (*extra && n < 63)
+                args[n++] = *extra++;
+        }
+        args[n] = NULL;
+        execv(fixture_bin, (char *const *)args);
         _exit(127);
     }
     close(in[0]);
@@ -115,6 +128,11 @@ static fixture fixture_start(const char *hostkey, int port)
     }
     fclose(fp);
     return f;
+}
+
+static fixture fixture_start(const char *hostkey, int port)
+{
+    return fixture_start_with(hostkey, port, NULL);
 }
 
 static void fixture_stop(fixture *f)
@@ -344,7 +362,17 @@ static void type(const char *text)
     spb_session_text(session, text, strlen(text), 0);
 }
 
+/* extra: NULL-terminated keyword/value pairs over the test defaults. */
+static void open_session_with(int port, const char *username, bool kbdint,
+                              const char *const *extra);
+
 static void open_session(int port, const char *username, bool kbdint)
+{
+    open_session_with(port, username, kbdint, NULL);
+}
+
+static void open_session_with(int port, const char *username, bool kbdint,
+                              const char *const *extra)
 {
     reset_record();
     spb_settings *s = spb_settings_new_defaults();
@@ -359,6 +387,8 @@ static void open_session(int port, const char *username, bool kbdint)
     spb_settings_set(s, "TryAgent", "0");
     spb_settings_set(s, "AuthGSSAPI", "0");
     spb_settings_set(s, "AuthGSSAPIKEX", "0");
+    for (; extra && *extra; extra += 2)
+        spb_settings_set(s, extra[0], extra[1]);
     char *err = NULL;
     session = spb_session_create(s, &callbacks, NULL, &err);
     spb_settings_free(s);
@@ -888,6 +918,64 @@ static void test_port_forwarding(fixture *f)
     echo_stop(&echo);
 }
 
+/* ---------- Public-key authentication (M09) ---------- */
+
+static void test_public_key_auth(void)
+{
+    char pub[700], key[700], secret_key[700];
+    snprintf(pub, sizeof(pub), "%s/userkey.pub", SPB_FIXTURES_DIR);
+    snprintf(key, sizeof(key), "%s/userkey.ppk", SPB_FIXTURES_DIR);
+    snprintf(secret_key, sizeof(secret_key), "%s/userkey-secret.ppk",
+             SPB_FIXTURES_DIR);
+    /* A server that only accepts this key, and shows a banner. */
+    const char *const opts[] = {
+        "--userkey", pub, "--deny-auth", "password",
+        "--deny-auth", "keyboard-interactive",
+        "--bannertext", "Welcome to the key-only test server\n", NULL };
+    fixture keyed = fixture_start_with("hostkey-a.ppk", 0, opts);
+
+    /* An unencrypted key: logged in with no prompt at all. */
+    const char *const with_key[] = { "PublicKeyFile", key, NULL };
+    open_session_with(keyed.port, "tester", false, with_key);
+    CHECK(wait_rec(has_prompt, 20));       /* a new port: unknown host key */
+    answer(SPB_ANSWER_ACCEPT_AND_STORE);
+    CHECK(wait_screen("Authenticating with public key \"SwiftPutty test user key (userkey)", 20));
+    CHECK(wait_screen("Welcome to the key-only test server", 20));  /* banner */
+    CHECK(wait_rec(is_connected, 20));
+    type("echo key-$((2*21))\r");
+    CHECK(wait_screen("\nkey-42\n", 20));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+
+    /* An encrypted key: PuTTY asks for the passphrase in the terminal;
+     * a wrong one is asked again. */
+    const char *const with_secret[] = { "PublicKeyFile", secret_key,
+                                        "SshBanner", "0", NULL };
+    open_session_with(keyed.port, "tester", false, with_secret);
+    CHECK(wait_screen("Passphrase for key \"SwiftPutty test user key (passphrase 'secret')", 20));
+    type("wrong\r");
+    CHECK(wait_screen("Wrong passphrase", 20));
+    type("secret\r");
+    CHECK(wait_rec(is_connected, 20));
+    CHECK(strstr(screen_text(), "Welcome to the key-only") == NULL); /* banner off */
+    CHECK(strstr(screen_text(), "secret") == NULL || strstr(screen_text(), "'secret'"));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+
+    /* No key, and nothing else allowed: the server refuses. */
+    open_session(keyed.port, "tester", false);
+    CHECK(wait_rec(is_final, 20));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.state == SPB_SESSION_FAILED);
+    CHECK(strstr(rec.detail, "No supported authentication methods") != NULL);
+    pthread_mutex_unlock(&rec.lock);
+    release_session();
+
+    fixture_stop(&keyed);
+}
+
 int main(void)
 {
     char template[] = "/tmp/spb-ssh-test-XXXXXX";
@@ -915,6 +1003,7 @@ int main(void)
     test_port_forwarding(&server);
     test_accept_once_and_cancel();
     test_changed_host_key(&server);
+    test_public_key_auth();
 
     CHECK(spb_core_barrier());
     CHECK(spb_debug_live_sessions() == 0);
