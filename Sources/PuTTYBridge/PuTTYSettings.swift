@@ -88,6 +88,16 @@ public struct PuTTYSettings: Hashable, Sendable, Codable {
         self.values = values
     }
 
+    /// A new bridge settings object holding these values, owned by the
+    /// caller (or by the core, when handed to it).
+    func makeBridgeHandle() -> OpaquePointer {
+        let handle = spb_settings_new_empty()!
+        for (key, value) in values {
+            spb_settings_set(handle, key, value)
+        }
+        return handle
+    }
+
     /// Runs `body` with a temporary bridge settings object holding these
     /// values. The handle is freed afterwards and must not escape.
     func withBridgeHandle<R>(_ body: (OpaquePointer) throws -> R) rethrows -> R {

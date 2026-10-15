@@ -79,7 +79,9 @@ public struct TerminalRenderer {
                 continue
             }
             let bold = cell.flags.contains(.bold)
-            let ctFont = (bold ? font.boldFont : font.font) as CTFont
+            let wide = cell.flags.contains(.wide)
+            let ctFont = font.font(bold: bold, wide: wide) as CTFont
+            let shadow = bold && font.shadowBold
             var glyphs: [CGGlyph] = []
             var positions: [CGPoint] = []
             var runColumn = column
@@ -87,6 +89,7 @@ public struct TerminalRenderer {
                 let c = cells[runColumn]
                 if c.flags.contains(.wideContinuation) { runColumn += 1; continue }
                 guard c.foreground == cell.foreground, c.flags.contains(.bold) == bold,
+                      c.flags.contains(.wide) == wide,
                       c.scalars.count == 1, let glyph = Self.glyph(for: c.scalars[0], in: ctFont)
                 else { break }
                 glyphs.append(glyph)
@@ -103,10 +106,22 @@ public struct TerminalRenderer {
                 context.textPosition = .zero
                 context.setFillColor(Self.cgColour(cell.foreground))
                 CTFontDrawGlyphs(ctFont, glyphs, positions, glyphs.count, context)
+                if shadow {
+                    // GTK PuTTY's shadow bold: the same glyphs again,
+                    // offset to the right.
+                    let shifted = positions.map { CGPoint(x: $0.x + font.shadowBoldOffset, y: $0.y) }
+                    CTFontDrawGlyphs(ctFont, glyphs, shifted, glyphs.count, context)
+                }
                 context.restoreGState()
                 column = runColumn
             } else {
                 drawComplexCell(cell, column: column, font: ctFont, in: context)
+                if shadow {
+                    context.saveGState()
+                    context.translateBy(x: font.shadowBoldOffset, y: 0)
+                    drawComplexCell(cell, column: column, font: ctFont, in: context)
+                    context.restoreGState()
+                }
                 column += 1
             }
         }

@@ -15,8 +15,16 @@ public enum TerminalSelectionBuffer {
 /// that GTK PuTTY's window code (unix/window.c), not the terminal, acts
 /// on, plus the Windows window options that have a macOS counterpart.
 public struct TerminalViewOptions: Equatable, Sendable {
-    public var fontName: String?
+    /// GTK PuTTY's Window/Fonts settings.
+    public var fonts: TerminalFontSpec
+    public var fontName: String? { fonts.fontName }
     public var showsScrollbar: Bool
+    /// Windows' "Display scrollbar in full screen mode".
+    public var scrollbarInFullScreen: Bool
+    /// Windows' "When window is resized" (`LockSize`): 0 change rows and
+    /// columns, 1 forbid resizing, 2 change the font size, 3 change the
+    /// font size only when maximised (zoomed or full screen).
+    public var resizeAction: Int
     /// GTK PuTTY's "Scrollbar on left".
     public var scrollbarOnLeft: Bool
     /// "Gap between text and window edge", in points.
@@ -42,8 +50,14 @@ public struct TerminalViewOptions: Equatable, Sendable {
         func flag(_ keyword: String, default value: Bool) -> Bool {
             settings[keyword].map { (Int($0) ?? 0) != 0 } ?? value
         }
-        fontName = settings["FontName"]
+        fonts = TerminalFontSpec(fontName: settings["FontName"], boldFontName: settings["BoldFontName"],
+                                 wideFontName: settings["WideFontName"],
+                                 wideBoldFontName: settings["WideBoldFontName"],
+                                 shadowBold: flag("ShadowBold", default: false),
+                                 shadowBoldOffset: Int(settings["ShadowBoldOffset"] ?? "") ?? 1)
         showsScrollbar = flag("ScrollBar", default: true)
+        scrollbarInFullScreen = flag("ScrollBarFullScreen", default: false)
+        resizeAction = Int(settings["LockSize"] ?? "") ?? 0
         scrollbarOnLeft = flag("ScrollbarOnLeft", default: false)
         border = CGFloat(max(0, Int(settings["WindowBorder"] ?? "") ?? 1))
         optionIsMeta = flag("OSXOptionMeta", default: true)
@@ -71,20 +85,36 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     public var border: CGFloat { options.border }
 
     private let scroller = NSScroller()
-    private var showsScrollbar: Bool { options.showsScrollbar }
+    private var showsScrollbar: Bool {
+        options.showsScrollbar && (!isFullScreen || options.scrollbarInFullScreen)
+    }
+
+    private var isFullScreen: Bool { window?.styleMask.contains(.fullScreen) ?? false }
+    /// Windows' IsZoomed: zoomed, or full screen.
+    private var isMaximised: Bool { isFullScreen || window?.isZoomed == true }
+
+    /// Whether resizing the window changes the font size, keeping the
+    /// rows and columns ("When window is resized").
+    private var scalesFont: Bool {
+        options.resizeAction == 2 || (options.resizeAction == 3 && isMaximised)
+    }
     private var bellSound: NSSound?
     private var observingIconTitle = false
     private var markedText = NSMutableAttributedString()
     private var lastSelection = ""
+    /// The last selection as RTF, when Copy as RTF made it styled.
+    public private(set) var lastSelectionRTF: Data?
     private var gridSize = (columns: 0, rows: 0)
     private var scrollAccumulator: CGFloat = 0
     private var pressedButton: TerminalMouseButton?
     private var trackingArea: NSTrackingArea?
+    /// Whether the session has the system colours yet.
+    private var sentSystemColours = false
 
     public init(controller: SessionController) {
         self.controller = controller
         options = TerminalViewOptions(settings: controller.settings)
-        renderer = TerminalRenderer(font: TerminalFont(puttyFontName: options.fontName))
+        renderer = TerminalRenderer(font: TerminalFont(spec: options.fonts))
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -115,7 +145,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         let options = TerminalViewOptions(settings: settings)
         return size(columns: Int(settings["TermWidth"] ?? "") ?? 80,
                     rows: Int(settings["TermHeight"] ?? "") ?? 24,
-                    font: TerminalFont(puttyFontName: options.fontName), options: options)
+                    font: TerminalFont(spec: options.fonts), options: options)
     }
 
     private static func size(columns: Int, rows: Int, font: TerminalFont,
@@ -147,6 +177,9 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         if gridSize == (0, 0) {
             // The view was laid out before the session existed.
             resizeTerminal()
+        }
+        if !sentSystemColours {
+            sendSystemColours()
         }
         let update = screen.update(from: session)
         updateScroller()
@@ -195,6 +228,16 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     private func resizeTerminal() {
         let usableWidth = bounds.width - scrollerWidth - 2 * border
         let usableHeight = bounds.height - 2 * border
+        if scalesFont, gridSize != (0, 0) {
+            fitFont(columns: gridSize.columns, rows: gridSize.rows,
+                    width: usableWidth, height: usableHeight)
+            return
+        }
+        let configured = TerminalFont(spec: options.fonts)
+        if renderer.font != configured {
+            renderer = TerminalRenderer(font: configured)    // back from scaling
+            needsDisplay = true
+        }
         let columns = max(1, Int(usableWidth / renderer.font.cellWidth))
         let rows = max(1, Int(usableHeight / renderer.font.cellHeight))
         guard (columns, rows) != gridSize, let session = controller.session else { return }
@@ -204,9 +247,51 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
                        pixelHeight: Int(CGFloat(rows) * renderer.font.cellHeight))
     }
 
+    /// The largest font (the configured fonts, scaled alike) that fits
+    /// `columns` x `rows` cells in the space.
+    private func fitFont(columns: Int, rows: Int, width: CGFloat, height: CGFloat) {
+        let base = TerminalFont(spec: options.fonts)
+        let factor = min(width / (CGFloat(columns) * base.cellWidth),
+                         height / (CGFloat(rows) * base.cellHeight))
+        var size = max(4, (base.font.pointSize * factor * 2).rounded(.down) / 2)
+        var font = TerminalFont(spec: options.fonts.scaled(by: size / base.font.pointSize))
+        while size > 4 && (CGFloat(columns) * font.cellWidth > width || CGFloat(rows) * font.cellHeight > height) {
+            size -= 0.5
+            font = TerminalFont(spec: options.fonts.scaled(by: size / base.font.pointSize))
+        }
+        if font != renderer.font {
+            renderer = TerminalRenderer(font: font)
+            needsDisplay = true
+        }
+    }
+
+    /// An application's resize request (windows/window.c
+    /// wintw_request_resize): refused if resizing is forbidden, or if the
+    /// window is maximised and resizing changes rows and columns; with a
+    /// scaled font, the window keeps its size and the font fits the new
+    /// size; otherwise the window is resized to fit.
     public func terminal(_ controller: SessionController, requestsResizeTo columns: Int, rows: Int) {
-        // As PuTTY's default "change the number of rows and columns":
-        // resize the window to fit, keeping its top-left corner.
+        guard columns > 0, rows > 0 else { return }
+        switch options.resizeAction {
+        case 1:
+            return
+        case 0 where isMaximised:
+            return
+        default:
+            break
+        }
+        if scalesFont {
+            gridSize = (columns, rows)
+            controller.session?.resize(columns: columns, rows: rows)
+            resizeTerminal()
+            return
+        }
+        resizeWindow(columns: columns, rows: rows)
+    }
+
+    /// Resize the window to hold `columns` x `rows`, keeping its top-left
+    /// corner.
+    private func resizeWindow(columns: Int, rows: Int) {
         guard let window, columns > 0, rows > 0 else { return }
         var frame = window.frame
         let content = window.frameRect(forContentRect: NSRect(origin: .zero, size: size(columns: columns, rows: rows)))
@@ -279,12 +364,51 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         return true
     }
 
+    /// "Use system colours" on macOS: the text and background colours,
+    /// and the selection colours for the cursor (Windows PuTTY uses its
+    /// highlight colours), as the view's appearance (light or dark)
+    /// resolves them.
+    func sendSystemColours() {
+        guard let session = controller.session else { return }
+        var values: [UInt32] = []
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            for colour in [NSColor.textColor, .textBackgroundColor,
+                           .selectedTextColor, .selectedTextBackgroundColor] {
+                let c = colour.usingColorSpace(.sRGB) ?? .black
+                values.append(UInt32((c.redComponent * 255).rounded()) << 16
+                              | UInt32((c.greenComponent * 255).rounded()) << 8
+                              | UInt32((c.blueComponent * 255).rounded()))
+            }
+        }
+        session.setSystemColours(foreground: values[0], background: values[1],
+                                 cursorText: values[2], cursor: values[3])
+        sentSystemColours = true
+    }
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        sendSystemColours()
+    }
+
+    /// Full screen changes the scrollbar ("Display scrollbar in full
+    /// screen mode") and, with "only when maximised", the font.
+    @objc private func windowFullScreenChanged(_ notification: Notification) {
+        scroller.isHidden = !showsScrollbar
+        setFrameSize(frame.size)
+        needsDisplay = true
+    }
+
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        sendSystemColours()
         NotificationCenter.default.removeObserver(self)
         guard let window else { return }
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged),
+                                                   name: name, object: window)
+        }
+        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowFullScreenChanged),
                                                    name: name, object: window)
         }
         applyWindowOptions()
@@ -431,8 +555,28 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         sendMouse(event, button: button, action: action)
     }
 
+    /// The window's menu, for a right-click that asks for it.
+    public var contextMenu: (() -> NSMenu?)?
+
+    /// windows/window.c WM_RBUTTONDOWN: the menu, not the terminal, gets
+    /// a right-click with Ctrl (also GTK PuTTY's gesture), or any
+    /// right-click when "Action of mouse buttons" is Windows
+    /// (`MouseIsXterm` 2), even if the application has the mouse.
+    public static func rightClickShowsMenu(control: Bool, mouseIsXterm: String?) -> Bool {
+        control || mouseIsXterm == "2"
+    }
+
     public override func mouseDown(with event: NSEvent) { press(event, .left) }
-    public override func rightMouseDown(with event: NSEvent) { press(event, .right) }
+    public override func rightMouseDown(with event: NSEvent) {
+        if Self.rightClickShowsMenu(control: event.modifierFlags.contains(.control),
+                                    mouseIsXterm: controller.settings["MouseIsXterm"]),
+           let menu = contextMenu?() {
+            window?.makeFirstResponder(self)
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+            return
+        }
+        press(event, .right)
+    }
     public override func otherMouseDown(with event: NSEvent) { press(event, .middle) }
     public override func mouseDragged(with event: NSEvent) { sendMouse(event, button: .left, action: .drag) }
     public override func rightMouseDragged(with event: NSEvent) { sendMouse(event, button: .right, action: .drag) }
@@ -469,10 +613,55 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         case .selection:
             TerminalSelectionBuffer.text = text
             lastSelection = text
+            lastSelectionRTF = nil
         case .system:
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+            Self.writeToGeneralPasteboard(text, rtf: nil)
         }
+    }
+
+    /// Copy as RTF: the plain text as usual, plus RTF in the terminal's
+    /// font (windows/window.c win_clip_write adds RTF beside the text).
+    public func terminal(_ controller: SessionController, write runs: [PuTTYStyleRun],
+                         to clipboard: PuTTYClipboard) {
+        let text = runs.map(\.text).joined()
+        let rtf = Self.rtf(for: runs, font: renderer.font)
+        switch clipboard {
+        case .selection:
+            TerminalSelectionBuffer.text = text
+            lastSelection = text
+            lastSelectionRTF = rtf
+        case .system:
+            Self.writeToGeneralPasteboard(text, rtf: rtf)
+        }
+    }
+
+    /// The runs of a styled copy as RTF. Runs in the terminal's default
+    /// colours carry no colour, so the receiver uses its own.
+    public static func rtf(for runs: [PuTTYStyleRun], font: TerminalFont) -> Data? {
+        let string = NSMutableAttributedString()
+        for run in runs {
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: run.bold ? font.boldFont : font.font,
+            ]
+            if let fg = run.fg { attributes[.foregroundColor] = colour(fg) }
+            if let bg = run.bg { attributes[.backgroundColor] = colour(bg) }
+            if run.underline { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+            string.append(NSAttributedString(string: run.text, attributes: attributes))
+        }
+        return string.rtf(from: NSRange(location: 0, length: string.length),
+                          documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+    }
+
+    private static func colour(_ rgb: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+                blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
+    }
+
+    private static func writeToGeneralPasteboard(_ text: String, rtf: Data?) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        if let rtf { pasteboard.setData(rtf, forType: .rtf) }
     }
 
     public func terminal(_ controller: SessionController, requestsPasteFrom clipboard: PuTTYClipboard) {
@@ -523,6 +712,14 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     private func applyWindowOptions() {
         guard let window else { return }
         window.level = options.alwaysOnTop ? .floating : .normal
+        // "Forbid resizing completely": no resizing, zooming or full screen.
+        if options.resizeAction == 1 {
+            window.styleMask.remove(.resizable)
+            window.collectionBehavior.insert(.fullScreenNone)
+        } else {
+            window.styleMask.insert(.resizable)
+            window.collectionBehavior.remove(.fullScreenNone)
+        }
         // Left alone otherwise, so the minimised title follows the title.
         if options.separateIconTitle {
             window.miniwindowTitle = controller.iconTitle.isEmpty ? window.title : controller.iconTitle
@@ -553,13 +750,13 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
                          to new: PuTTYSettings) {
         let previous = options
         options = TerminalViewOptions(settings: new)
-        if options.fontName != previous.fontName {
-            renderer = TerminalRenderer(font: TerminalFont(puttyFontName: options.fontName))
+        if options.fonts != previous.fonts {
+            renderer = TerminalRenderer(font: TerminalFont(spec: options.fonts))
         }
         if options.bellSoundFile != previous.bellSoundFile {
             bellSound = nil
         }
-        scroller.isHidden = !options.showsScrollbar
+        scroller.isHidden = !showsScrollbar
         if previous.separateIconTitle && !options.separateIconTitle, let window {
             window.miniwindowTitle = window.title
         }
@@ -575,7 +772,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
         if needsSize {
             gridSize = (0, 0)               // tell the terminal the size again
             if window != nil {
-                terminal(controller, requestsResizeTo: columns, rows: rows)
+                resizeWindow(columns: columns, rows: rows)
             }
             setFrameSize(frame.size)
         }
@@ -596,8 +793,7 @@ public final class TerminalView: NSView, @preconcurrency NSTextInputClient,
     /// Edit > Copy: the current selection to the general pasteboard.
     @objc public func copy(_ sender: Any?) {
         guard !lastSelection.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lastSelection, forType: .string)
+        Self.writeToGeneralPasteboard(lastSelection, rtf: lastSelectionRTF)
     }
 
     /// Edit > Paste: the general pasteboard, bracketed-paste aware.

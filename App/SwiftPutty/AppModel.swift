@@ -72,6 +72,11 @@ final class AppModel {
         do {
             let directory = try PuTTYCore.defaultStateDirectory()
             try PuTTYCore.initialize(stateDirectory: directory)
+            // PuTTY opens saved sessions by name for SSH proxies.
+            PuTTYCore.setSavedSessionLookup { [sessionStore] name in
+                guard let (settings, exists) = try? sessionStore.load(name), exists else { return nil }
+                return settings
+            }
             coreState = .running(stateDirectory: directory)
         } catch {
             coreState = .failed(message: error.localizedDescription)

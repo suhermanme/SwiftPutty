@@ -64,6 +64,11 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case bell(mode: Int32)
     /// Put text on a clipboard.
     case clipboardWrite(PuTTYClipboard, String)
+    /// Put styled text on a clipboard, as PuTTY's Windows build does for
+    /// Copy as RTF (`PasteRTF`): the selection coalesced into runs of
+    /// equal style. Sent *instead of* ``clipboardWrite(_:_:)`` for that
+    /// copy; joining the runs' text gives the plain text of the selection.
+    case clipboardWriteStyled(PuTTYClipboard, [PuTTYStyleRun])
     /// The terminal wants a paste: answer with ``PuTTYSession/paste(_:)``.
     case pasteRequested(PuTTYClipboard)
     /// The application asked for a terminal size (already acknowledged).
@@ -202,6 +207,33 @@ public enum PuTTYClipboard: Sendable, Equatable {
     }
 }
 
+/// One run of equally styled text from a styled copy
+/// (``PuTTYSessionEvent/clipboardWriteStyled(_:_:)``).
+public struct PuTTYStyleRun: Sendable, Equatable {
+    /// The run's text.
+    public let text: String
+    /// The text colour as 0xRRGGBB, or nil when the run uses the
+    /// terminal's default foreground (so the receiver can follow its own
+    /// appearance).
+    public let fg: UInt32?
+    /// The background colour, likewise.
+    public let bg: UInt32?
+    /// Whether the run is drawn bold. PuTTY's RTF copy styles text with
+    /// bold and underline only.
+    public let bold: Bool
+    /// Whether the run is drawn underlined.
+    public let underline: Bool
+
+    init(_ run: spb_style_run) {
+        let bytes = run.text.map { Data(bytes: $0, count: run.text_len) } ?? Data()
+        text = String(decoding: bytes, as: UTF8.self)
+        fg = run.fg == SPB_COLOUR_DEFAULT ? nil : run.fg
+        bg = run.bg == SPB_COLOUR_DEFAULT ? nil : run.bg
+        bold = run.flags & SPB_RUN_BOLD != 0
+        underline = run.flags & SPB_RUN_UNDERLINE != 0
+    }
+}
+
 /// One PuTTY session, executed on the process-wide PuTTY core thread.
 ///
 /// Every operation returns at once; the work is queued for the core
@@ -303,6 +335,13 @@ public final class PuTTYSession: Sendable {
             close_warning: { ctx, request, connected, text in
                 EventSink.from(ctx).yield(.closeWarning(request: request, connected: connected,
                                                         text: text.map { String(cString: $0) }))
+            },
+            clipboard_write_styled: { ctx, clipboard, runs, nRuns in
+                guard let runs, nRuns > 0 else { return }
+                // The runs and their text belong to the bridge and are valid
+                // only for this call, so copy them out.
+                let styleRuns = (0..<nRuns).map { PuTTYStyleRun(runs[$0]) }
+                EventSink.from(ctx).yield(.clipboardWriteStyled(PuTTYClipboard(clipboard), styleRuns))
             })
 
         var error: UnsafeMutablePointer<CChar>?
@@ -385,6 +424,14 @@ public final class PuTTYSession: Sendable {
     /// ``PuTTYSessionEvent/closeWarning(request:connected:text:)``.
     public func queryCloseWarning(request: UInt64) {
         spb_session_query_close_warning(handle, request)
+    }
+
+    /// The system's colours for "Use system colours" (0xRRGGBB): text,
+    /// background, and the cursor's text and colour. They apply while the
+    /// setting is on; send them again when they change.
+    public func setSystemColours(foreground: UInt32, background: UInt32,
+                                 cursorText: UInt32, cursor: UInt32) {
+        spb_session_set_system_colours(handle, foreground, background, cursorText, cursor)
     }
 
     /// Clear Scrollback.

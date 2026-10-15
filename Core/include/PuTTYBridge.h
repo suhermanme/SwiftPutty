@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 9
+#define SPB_API_VERSION 11
 
 /* ---------- Library information ---------- */
 
@@ -87,6 +87,7 @@ bool spb_core_is_initialised(void);
 
 /* Whether the calling thread is the PuTTY core thread. */
 bool spb_core_is_core_thread(void);
+
 
 /*
  * Block until every command posted to the core thread before this call
@@ -158,6 +159,71 @@ void spb_settings_prepare_session(spb_settings *settings);
  */
 const char *spb_charset_name(size_t index);
 const char *spb_charset_canonical_name(const char *line_codepage);
+
+/*
+ * Saved sessions by name, for the places where PuTTY itself opens one
+ * (API v10): an SSH proxy whose host name names a saved session, and
+ * "Default Settings", which such a proxy otherwise starts from. The
+ * frontend owns saved sessions (D-027), so the core asks it: lookup is
+ * called on the core thread with the session name ("Default Settings"
+ * for PuTTY's default) and returns a new settings object, which the core
+ * frees, or NULL if there is no such session. It must return promptly
+ * and must not call session functions. Without a lookup (the default),
+ * no saved session exists. May be called again to replace it; ctx must
+ * stay valid until then.
+ */
+typedef spb_settings *(*spb_saved_session_lookup)(void *ctx, const char *name);
+
+/*
+ * A manually configured host key as PuTTY stores it (API v10; upstream
+ * validate_manual_hostkey, for the Host keys panel's "Add key"): an
+ * SHA256 or MD5 fingerprint, or a public key blob, found in text (for
+ * example a pasted known_hosts line), canonicalised. Owned; NULL if text
+ * holds none. Any thread.
+ */
+char *spb_canonical_manual_host_key(const char *text);
+
+/* ---------- Trusted host certification authorities (API v10) ----------
+ *
+ * PuTTY's global list of CAs trusted to sign host keys, stored in the
+ * state directory (upstream unix/storage.c), with the rules of upstream's
+ * "Configure host CAs" dialog. Each call waits for the core thread
+ * (like spb_core_barrier): the core must be running, and a session
+ * callback must not call them. Returned strings and records are owned.
+ */
+
+typedef struct spb_host_ca {
+    char *name;                    /* shown in log messages */
+    char *public_key;              /* base64 key blob, or a key file's text */
+    char *validity;                /* "valid hosts" expression */
+    bool permit_rsa_sha1, permit_rsa_sha256, permit_rsa_sha512;
+} spb_host_ca;
+
+/* A new record with upstream's defaults (RSA: SHA-256 and SHA-512). */
+spb_host_ca *spb_host_ca_new_default(void);
+/* The record saved under name, or NULL. Its key is a base64 blob. */
+spb_host_ca *spb_host_ca_load(const char *name);
+void spb_host_ca_free(spb_host_ca *ca);
+
+/* The saved records' names (free with spb_strings_free). */
+char **spb_host_ca_names(size_t *count);
+void spb_strings_free(char **strings, size_t count);
+
+/* What the public key text is: its fingerprint, or why it is not a
+ * usable CA key ("" for empty text). If valid and public_key_out is
+ * non-NULL, it receives the key as a base64 blob. */
+char *spb_host_ca_key_info(const char *text, char **public_key_out);
+
+/* Save (replacing a record of the same name): NULL on success, else the
+ * error. For an error in the validity expression, error_offset and
+ * error_length (if non-NULL) locate it; otherwise the offset is
+ * SIZE_MAX. */
+char *spb_host_ca_save(const spb_host_ca *ca, size_t *error_offset,
+                       size_t *error_length);
+/* Delete: NULL on success, else the error. */
+char *spb_host_ca_delete(const char *name);
+void spb_core_set_saved_session_lookup(spb_saved_session_lookup lookup,
+                                       void *ctx);
 
 /* ---------- Session ---------- */
 
@@ -263,6 +329,23 @@ typedef struct spb_special {
     int32_t code, arg;
 } spb_special;
 
+/* One run of equally styled text from a styled copy (API v11). The text
+ * is UTF-8. fg/bg are 0xRRGGBB, or SPB_COLOUR_DEFAULT when the cell uses
+ * the terminal's default colour (so the receiver can follow its own
+ * appearance). flags are the SPB_RUN_* bits. */
+#define SPB_COLOUR_DEFAULT 0xFFFFFFFFu
+/* (PuTTY's Windows RTF copy styles text with bold and underline only;
+ * strikethrough is drawn on screen but not copied, so there is no
+ * SPB_RUN_STRIKE.) */
+#define SPB_RUN_BOLD       1u
+#define SPB_RUN_UNDERLINE  2u
+typedef struct spb_style_run {
+    const char *text;              /* UTF-8, not NUL-terminated */
+    size_t text_len;
+    uint32_t fg, bg;               /* 0xRRGGBB or SPB_COLOUR_DEFAULT */
+    uint32_t flags;                /* SPB_RUN_* */
+} spb_style_run;
+
 typedef enum spb_session_state {
     SPB_SESSION_CREATED,      /* not started yet */
     SPB_SESSION_CONNECTING,   /* started; the backend is not ready for input */
@@ -360,6 +443,19 @@ typedef struct spb_session_callbacks {
      * connections."), or NULL. */
     void (*close_warning)(void *ctx, uint64_t request, bool connected,
                           const char *text);
+
+    /* --- Styled copy (M12, API v11) --- */
+
+    /* Put styled text on a clipboard, as PuTTY's Windows build does for
+     * Copy as RTF (CONF_rtf_paste): the selection coalesced into runs of
+     * equal style. The runs and their text are owned by the bridge and
+     * valid only for the duration of the call. Called INSTEAD of
+     * clipboard_write for that copy, so the frontend writes the plain
+     * text itself if it wants it too; never called when the callback is
+     * NULL or the setting is off. */
+    void (*clipboard_write_styled)(void *ctx, spb_clipboard clipboard,
+                                   const spb_style_run *runs,
+                                   size_t n_runs);
 } spb_session_callbacks;
 
 /*
@@ -625,6 +721,15 @@ void spb_session_scroll(spb_session *session, spb_scroll_mode mode,
 /* Copy the whole scrollback and screen to the system clipboard (PuTTY's
  * "Copy All to Clipboard"). */
 void spb_session_copy_all(spb_session *session);
+
+/* "Use system colours" (UseSystemColours, Windows PuTTY's option; API
+ * v10): the system's text colour, background, and cursor text and
+ * cursor colours (0xRRGGBB), which replace the configured default and
+ * cursor colours while the setting is on. Call again when they change
+ * (for example light and dark mode). */
+void spb_session_set_system_colours(spb_session *session, uint32_t fg,
+                                    uint32_t bg, uint32_t cursor_fg,
+                                    uint32_t cursor_bg);
 
 /* "Clear Scrollback" (term_clrsb) and "Reset Terminal" (term_pwron, as
  * GTK PuTTY's menu items; API v9). */

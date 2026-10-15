@@ -683,3 +683,107 @@ refused `connect()` still wakes the loop (select reports the socket
 writable), so patch `0002` is no longer exercised by the loop; it stays
 applied, as pollwrap is upstream code still built. Cost is O(highest
 descriptor) per iteration, small next to the per-iteration uxsel rescan.
+
+## D-036 — Saved sessions for PuTTY's own lookups: a frontend callback (API v10)
+
+**Status:** Accepted (M12)
+**Context:** An SSH proxy ("jump host") names its host either as a host
+or as a saved session, and PuTTY opens it with `do_defaults(name)`,
+starting from "Default Settings" otherwise. Saved sessions belong to the
+frontend's versioned store (D-027), not to `unix/storage.c`, so the core
+found no session at all and every jump host started from built-in
+defaults.
+**Options considered:** (a) Mirror the store into PuTTY's Unix session
+files. Rejected: two stores and two formats to keep consistent. (b) Pass
+every saved session into the core up front. Rejected: stale after any
+save, and it loads every session for each connection. (c) Let the core
+ask the frontend by name when PuTTY asks.
+**Decision:** (c). `spb_core_set_saved_session_lookup` installs a
+callback the core calls on the core thread with the session name
+("Default Settings" for PuTTY's default); it returns a new settings
+object or NULL. `PuTTYCore.setSavedSessionLookup` wraps it and
+`AppModel.startCore` answers from the saved-session store. The callback
+must return promptly and must not call session functions.
+**Consequences:** SSH proxies behave as in PuTTY, including a proxy that
+is itself a saved session with its own settings (tested by
+`test_ssh_jump_proxy` and Swift `ProxyTests`). Without a lookup, no
+saved session exists, which is what the C tests and plain library users
+get.
+
+## D-037 — Host CAs: a native window over upstream's storage, ca-config.c not linked
+
+**Status:** Accepted (M12)
+**Context:** Windows PuTTY's "Configure host CAs" is a separate dialog
+(`ssh/ca-config.c`) written against the portable `ctrl_*`/`dlg_*` dialog
+API, over the `host_ca_*` storage API that `unix/storage.c` implements in
+the state directory.
+**Options considered:** (a) Implement upstream's dialog API to run
+ca-config.c. Rejected: a second dialog system for one window. (b) Keep
+CAs in the frontend's store. Rejected: PuTTY's certificate checks read
+`host_ca_load` itself. (c) Bridge functions with the dialog's rules, and
+a native window.
+**Decision:** (c). `Core/src/spb_hostca.c` (API v10) lists, loads, saves
+and deletes records through upstream storage on the core thread, and
+applies ca-config.c's rules: the key may be base64 or a public key
+file's text and is shown by fingerprint, may not be a certificate, and
+the validity expression must parse (its error located by offset and
+length for the editor). `HostCAStore` and `HostCAEditor` provide the
+window, opened from the Host keys panel, also mid-session.
+`ca-config.c.o` is filtered out of the core archive in
+`SwiftPuttyCore.cmake`.
+**Consequences:** Records are upstream's format in upstream's place, so
+PuTTY's own certificate validation uses them unchanged. An upstream
+change to ca-config.c's rules must be mirrored in spb_hostca.c
+(UPSTREAM_PUTTY.md update procedure).
+
+## D-038 — Mouse button actions and the terminal's context menu
+
+**Status:** Accepted (M12)
+**Context:** Windows PuTTY's "Action of mouse buttons" (`MouseIsXterm`)
+decides what the right button does: in Windows mode it opens the
+window's menu and the middle button extends; in Compromise and xterm
+modes the right button pastes or extends. Ctrl+right-click always opens
+the menu (`WM_RBUTTONDOWN`), and GTK PuTTY uses the same gesture. macOS
+has no window (system) menu.
+**Decision:** The terminal view shows a context menu for Ctrl+right-click,
+or any right-click in Windows mode, even when the application has the
+mouse; otherwise the click goes to PuTTY's terminal as before. The menu
+(`SessionContextMenu` in `SessionWindow.swift`) copies the app's own
+items: New Session, the Session menu in its order, Copy, Paste, Copy
+All to Clipboard, and About, so it never disagrees with the menu bar.
+**Consequences:** All three modes behave as on Windows for the right
+button. On a trackpad, a two-finger click is a right-click and follows
+the same rule.
+
+## D-039 — System colours, resize actions and Copy as RTF on macOS
+
+**Status:** Accepted (M12)
+**Context:** Three Windows settings name Windows facilities:
+`UseSystemColours` (the Windows text and highlight colours), `LockSize`
+("When window is resized", including the "maximised" case) and
+`PasteRTF` (an RTF clipboard format beside the text).
+**Decision:**
+- *System colours:* the view resolves `textColor`, `textBackgroundColor`,
+  `selectedTextColor` and `selectedTextBackgroundColor` in its effective
+  appearance and sends them with `spb_session_set_system_colours` (API
+  v10), which overrides the default and cursor colours while the setting
+  is on; they are sent again when the appearance changes, so the
+  terminal follows light and dark mode.
+- *Resize actions:* "maximised" is zoomed or full screen. Forbid removes
+  resizing, zooming and full screen. With "change the font size" the
+  grid is kept and the font scaled to fit; an application's resize
+  request is refused when forbidden, or when maximised and changing rows
+  and columns, as `wintw_request_resize` does.
+- *Copy as RTF:* the bridge (API v11, `clipboard_write_styled`) hands the
+  frontend the copy as runs of equal style, decided as `win_clip_write`
+  decides them (colours after reverse video and bold/blink bumps; the
+  default colours reported as "default"; bold and underline only). The
+  view writes plain text and RTF (terminal font, colours, bold font,
+  underline) to the pasteboard; runs in the default colours carry no
+  colour so the receiving app uses its own. The X selection buffer keeps
+  the RTF so Edit > Copy includes it.
+**Consequences:** All three are tested (C `test_system_colours`,
+`test_copy_as_rtf`; Swift `systemColoursFollowTheAppearance`,
+`resizeActions`, `copyAsRTF`). Windows writes its RTF by hand; macOS
+generates it from an attributed string, so the exact RTF text differs
+while the styling is the same.

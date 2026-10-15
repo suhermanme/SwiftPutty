@@ -1,0 +1,44 @@
+SwiftPutty local patch 0010
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (a proxy connection can hang)
+
+HTTP proxy: complete the blank line that ends the response headers at
+once.
+
+read_line() treats a header line as complete only when the byte after
+its newline arrives, so that it can tell whether the next line is a
+continuation (starting with a space or tab). That is right for real
+header lines, but it also applied to the empty line ending the header
+section. When the proxy sends nothing after that line, the negotiation
+stalls:
+
+  - a "407 Proxy Authentication Required" with "Content-Length: 0":
+    the authenticated retry waits until the proxy sends more, and
+  - a "200 Connection established": the tunnel is not handed to the
+    backend until the destination sends a byte, so protocols where the
+    client speaks first (Rlogin, Raw) never start.
+
+Found with an HTTP proxy played by Core/tests/spb_backends_test.c. An
+empty line cannot be continued, so it is complete as soon as its
+newline arrives.
+
+--- a/proxy/http.c
++++ b/proxy/http.c
+@@ -30,6 +30,17 @@
+                  * header, then any newline terminates it. */
+                 goto done;
+             }
++
++            if (is_header && output->s[output->len - 1] == '\n' &&
++                (output->len == 1 ||
++                 (output->len == 2 && output->s[0] == '\r'))) {
++                /* An empty line ends the header section, and cannot
++                 * be continued: it is complete now. Waiting for the
++                 * next byte would stall whenever the proxy sends
++                 * nothing more (a 407 with no body, or a 200 before
++                 * the server's first byte). */
++                goto done;
++            }
+         }
+     }
+ 

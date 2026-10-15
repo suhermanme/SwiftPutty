@@ -70,6 +70,77 @@ public final class ConfigurationModel: Identifiable {
         !isMidSession || connectionType == "ssh"
     }
 
+    // MARK: - Environment variables (config.c environ_handler)
+
+    /// The Variable and Value boxes.
+    public var environmentName = ""
+    public var environmentValue = ""
+
+    /// The list, in PuTTY's order.
+    public var environmentVariables: [(name: String, value: String)] {
+        settings.environmentVariables
+    }
+
+    /// Add: both boxes must be filled in (else a beep); a variable
+    /// already listed takes the new value. The boxes are then emptied.
+    public func addEnvironmentVariable() {
+        guard !environmentName.isEmpty, !environmentValue.isEmpty else {
+            beep()
+            return
+        }
+        settings.environmentVariables = environmentVariables.filter { $0.name != environmentName }
+            + [(environmentName, environmentValue)]
+        environmentName = ""
+        environmentValue = ""
+    }
+
+    /// Remove: the entry goes back into the boxes, for editing.
+    public func removeEnvironmentVariable(at index: Int?) {
+        let variables = environmentVariables
+        guard let index, variables.indices.contains(index) else {
+            beep()
+            return
+        }
+        (environmentName, environmentValue) = variables[index]
+        settings.environmentVariables = variables.enumerated().filter { $0.offset != index }.map(\.element)
+    }
+
+    // MARK: - Manually configured host keys (manual_hostkey_handler)
+
+    /// The Key box.
+    public var manualHostKeyText = ""
+
+    public var manualHostKeys: [String] { settings.manualHostKeys }
+
+    /// Add key, with config.c's messages for an empty, unrecognised or
+    /// duplicate key. The canonical form is stored.
+    public func addManualHostKey() {
+        guard !manualHostKeyText.isEmpty else {
+            errorMessage = "You need to specify a host key or fingerprint"
+            return
+        }
+        guard let key = PuTTYCore.canonicalManualHostKey(manualHostKeyText) else {
+            errorMessage = "Host key is not in a valid format"
+            return
+        }
+        guard !manualHostKeys.contains(key) else {
+            errorMessage = "Specified host key is already listed"
+            return
+        }
+        settings.manualHostKeys = manualHostKeys + [key]
+    }
+
+    /// Remove: the key goes back into the Key box.
+    public func removeManualHostKey(at index: Int?) {
+        let keys = manualHostKeys
+        guard let index, keys.indices.contains(index) else {
+            beep()
+            return
+        }
+        manualHostKeyText = keys[index]
+        settings.manualHostKeys = keys.enumerated().filter { $0.offset != index }.map(\.element)
+    }
+
     // MARK: - Destination
 
     /// PuTTY's `conf_launchable`: there is somewhere to connect to.

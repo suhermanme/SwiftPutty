@@ -61,7 +61,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Answerback to ^E (`CONF_answerback`) | Text field | COMPLETE | runtime |  |
 | Local echo (`CONF_localecho`) | Radio Auto/Force on/Force off | COMPLETE | runtime | `ldisc_configure`. |
 | Local line editing (`CONF_localedit`) | Radio | COMPLETE | runtime | `ldisc_configure` + `ldisc_echoedit_update`. |
-| Printer for ANSI printing (`CONF_printer`) | Popup of CUPS printers | NOT STARTED | runtime | `term_reconfig` aborts an active print job when cleared. Initially stubbed (`stubs/no-print.c`) |
+| Printer for ANSI printing (`CONF_printer`) | Terminal panel field with a menu of an `lpr -P` command per macOS printer (`NSPrinter`); upstream `unix/printing.c` pipes the job to the command | COMPLETE | runtime | M12: `test_printing` (ESC[5i … ESC[4i piped, not displayed) |
 
 ## Terminal → Keyboard
 
@@ -110,11 +110,11 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
 | Columns / Rows (`CONF_width`, `CONF_height`) | Number fields; the window opens at that size | COMPLETE | runtime | Hidden mid-session only if the backend forbids resize. |
-| When window is resized (`CONF_resize_action`) | Radio: change rows/cols, change font size, both, forbid | NOT STARTED | runtime | |
+| When window is resized (`CONF_resize_action`) | Radio: change rows/cols, change font size, both, forbid | COMPLETE | runtime | M12: Swift `resizeActions` |
 | Lines of scrollback (`CONF_savelines`) | Number field | COMPLETE | runtime | `term_size`. |
 | Display scrollbar (`CONF_scrollbar`) | Checkbox (NSScroller visibility) | COMPLETE | runtime |  |
 | *(Unix/GTK)* Scrollbar on left (`CONF_scrollbar_on_left`) | Checkbox | COMPLETE | runtime |  |
-| Display scrollbar in full screen (`CONF_scrollbar_in_fullscreen`) | Checkbox | NOT STARTED | runtime | macOS full-screen space |
+| Display scrollbar in full screen (`CONF_scrollbar_in_fullscreen`) | Checkbox | COMPLETE | runtime | M12 |
 | Reset scrollback on keypress (`CONF_scroll_on_key`) | Checkbox | COMPLETE | runtime |  |
 | Reset scrollback on display activity (`CONF_scroll_on_disp`) | Checkbox | COMPLETE | runtime |  |
 | Push erased text into scrollback (`CONF_erase_to_scrollback`) | Checkbox | COMPLETE | runtime |  |
@@ -126,12 +126,12 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Cursor appearance (`CONF_cursor_type`) | Radio Block/Underline/Vertical line | COMPLETE | runtime |  |
 | Cursor blinks (`CONF_blink_cur`) | Checkbox | COMPLETE | runtime | Blinking is done by PuTTY's terminal. |
 | Font (`CONF_font`) | Font description + Change… popover: fixed-pitch family and size; stored as `"<PostScriptName> <pt>"` | COMPLETE | runtime | Unix FontSpec is a string; we store `"<PostScriptName> <pt>"`. Default `Menlo-Regular 12` (Windows: Courier New 10), set in M01. |
-| Allow variable-pitch fonts | Checkbox (font panel filter) | NOT STARTED | runtime | UI-only in Windows too |
+| Allow variable-pitch fonts | Checkbox (font panel filter) | COMPLETE | runtime | M12: font chooser filter, not saved (as Windows) |
 | Font quality (`CONF_font_quality`) | — | NOT APPLICABLE | unsupported | ClearType/antialias options; macOS always antialiases. Kept in the model for round-trip |
 | Hide mouse pointer when typing (`CONF_hide_mouseptr`) | Checkbox (`NSCursor.setHiddenUntilMouseMoves`) | COMPLETE | runtime | Before M06 the pointer was always hidden while typing. |
 | Gap between text and window edge (`CONF_window_border`) | Number field | COMPLETE | runtime |  |
 | Sunken-edge border (`CONF_sunken_edge`) | — | NOT APPLICABLE | unsupported | Win32 window style |
-| *(Unix/GTK)* Bold/wide/wide-bold fonts, shadow bold (`CONF_boldfont`, `CONF_widefont`, `CONF_wideboldfont`, `CONF_shadowbold`, `CONF_shadowboldoffset`) | Optional advanced font section | NOT STARTED | runtime | Not in Windows UI; keys exist in `conf.h` |
+| *(Unix/GTK)* Bold/wide/wide-bold fonts, shadow bold (`CONF_boldfont`, `CONF_widefont`, `CONF_wideboldfont`, `CONF_shadowbold`, `CONF_shadowboldoffset`) | Optional advanced font section | COMPLETE | runtime | M12: Window/Fonts panel; Swift font and pixel tests |
 
 ## Window → Behaviour
 
@@ -161,13 +161,13 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Action of mouse buttons (`CONF_mouse_is_xterm`) | Radio: Windows / Compromise / xterm | NOT STARTED | runtime | Right-click context menu vs paste follows this, as in Windows |
+| Action of mouse buttons (`CONF_mouse_is_xterm`) | Radio: Windows / Compromise / xterm | COMPLETE | runtime | M12 (D-038): the context menu opens on Ctrl+right-click, or right-click in Windows mode |
 | Shift overrides application's mouse (`CONF_mouse_override`) | Checkbox | COMPLETE | runtime |  |
 | Default selection mode (`CONF_rect_select`) | Radio Normal/Rectangular (Option-drag = other) | COMPLETE | runtime | Windows uses Alt-drag. |
 | Auto-copy selected text (`CONF_mouseautocopy`) | Checkbox | COMPLETE | runtime |  |
 | Mouse paste / Ctrl+Ins / Ctrl+Shift+C,V clipboards (`CONF_mousepaste`, `CONF_ctrlshiftins`, `CONF_ctrlshiftcv` + `_custom`) | Popups: No action / Last selected text / System clipboard (OS X names); Ctrl+Insert copy and Ctrl+Shift+C/V in the bridge (API v6) | COMPLETE | runtime | ⌘C/⌘V always use the general pasteboard. Named (custom) clipboards are X11-only and act as No action. ⌘C/⌘V always use the general pasteboard. |
 | Permit control characters in paste (`CONF_paste_controls`) | Checkbox | COMPLETE | runtime |  |
-| Copy as RTF (`CONF_rtf_paste`) | Checkbox (writes `.rtf` pasteboard type too) | NOT STARTED | runtime | |
+| Copy as RTF (`CONF_rtf_paste`) | Checkbox; the copy writes RTF (terminal font, colours, bold, underline) beside the plain text on the pasteboard | COMPLETE | runtime | M12 (D-039): `test_copy_as_rtf`, Swift `copyAsRTF` |
 | Character classes (`CONF_wordness`) | Selection/Copy panel: table of characters 0–127 + "Set to class" | COMPLETE | runtime | `term_reconfig` resets classes. |
 
 ## Window → Colours
@@ -179,7 +179,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Allow 24-bit colour (`CONF_true_colour`) | Checkbox | COMPLETE | runtime |  |
 | Indicate bold by (`CONF_bold_style`) | Radio font / colour / both | COMPLETE | runtime |  |
 | Attempt to use logical palettes (`CONF_try_palette`) | — | NOT APPLICABLE | unsupported | 256-colour display mode concept |
-| Use system colours (`CONF_system_colour`) | Checkbox (NSColor.textColor/textBackgroundColor, follows dark mode) | NOT STARTED | runtime | `term_notify_palette_changed` |
+| Use system colours (`CONF_system_colour`) | Checkbox (NSColor.textColor/textBackgroundColor, follows dark mode) | COMPLETE | runtime | M12 (D-039): API v10 `spb_session_set_system_colours`; `test_system_colours`, Swift `systemColoursFollowTheAppearance` |
 | Colour list + RGB (`CONF_colours`) | List with swatches + Red/Green/Blue fields + Modify… (ColorPicker) | COMPLETE | runtime | `term_reconfig` updates the palette unless overridden by OSC. Components clamped to 0–255, as `colour_handler`. |
 
 ## Connection
@@ -191,7 +191,7 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | TCP keepalives (`CONF_tcp_keepalives`) | Checkbox | COMPLETE | reconnect |  |
 | Internet protocol version (`CONF_addressfamily`) | Radio Auto/IPv4/IPv6 | COMPLETE | reconnect |  |
 | Logical name of remote host (`CONF_loghost`) | Text field | COMPLETE | reconnect | Host-key lookup name |
-| Command to run before connection (`CONF_pre_connect_command`) | — | NOT STARTED | reconnect | **Security review needed** before enabling (runs a local command) |
+| Command to run before connection (`CONF_pre_connect_command`) | — | NOT STARTED | reconnect | Deferred to M13: **security review needed** before enabling (runs a local command) |
 
 ## Connection → Data
 
@@ -201,21 +201,21 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | When username not specified (`CONF_username_from_env`) | Radio Prompt / Use system username | COMPLETE | reconnect | macOS: `getpwuid` via `unix/utils/get_username.c` |
 | Terminal-type string (`CONF_termtype`) | Text field (default `xterm`) | COMPLETE | reconnect |  |
 | Terminal speeds (`CONF_termspeed`) | Text field | COMPLETE | reconnect |  |
-| Environment variables (`CONF_environmt`) | Key/value table | NOT STARTED | reconnect | |
+| Environment variables (`CONF_environmt`) | Key/value table | COMPLETE | reconnect | M12: `test_environment` |
 
 ## Connection → Proxy
 
 | Windows PuTTY setting | macOS implementation | Status | Runtime | Notes |
 |---|---|---|---|---|
-| Proxy type (`CONF_proxy_type`) | Popup None/SOCKS4/SOCKS5/HTTP/Telnet/SSH (jump)/Local command | NOT STARTED | reconnect | All via upstream `proxy/` |
-| Proxy host / port (`CONF_proxy_host`, `CONF_proxy_port`) | Text fields | NOT STARTED | reconnect | |
-| Exclude hosts (`CONF_proxy_exclude_list`) | Text field | NOT STARTED | reconnect | |
-| Consider proxying local host (`CONF_even_proxy_localhost`) | Checkbox | NOT STARTED | reconnect | |
-| DNS at proxy end (`CONF_proxy_dns`) | Radio No/Auto/Yes | NOT STARTED | reconnect | |
-| Proxy username (`CONF_proxy_username`) | Text field | NOT STARTED | reconnect | |
-| Proxy password (`CONF_proxy_password`) | Secure field. **Never written to the session file**; optional Keychain item | NOT STARTED | reconnect | Deviation: PuTTY saves this in plaintext |
-| Telnet/local proxy command (`CONF_proxy_telnet_command`) | Text field | NOT STARTED | reconnect | |
-| Print proxy diagnostics (`CONF_proxy_log_to_term`) | Radio | NOT STARTED | reconnect | |
+| Proxy type (`CONF_proxy_type`) | Popup None/SOCKS4/SOCKS5/HTTP/Telnet/SSH (jump)/Local command | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Proxy host / port (`CONF_proxy_host`, `CONF_proxy_port`) | Text fields | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Exclude hosts (`CONF_proxy_exclude_list`) | Text field | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Consider proxying local host (`CONF_even_proxy_localhost`) | Checkbox | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| DNS at proxy end (`CONF_proxy_dns`) | Radio No/Auto/Yes | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Proxy username (`CONF_proxy_username`) | Text field | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Proxy password (`CONF_proxy_password`) | Secure field | PARTIAL | reconnect | Works for SOCKS 5 and HTTP (M12). Still saved in the session file as PuTTY does; keeping it out of the file (Keychain) is deferred to M13 |
+| Telnet/local proxy command (`CONF_proxy_telnet_command`) | Text field | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
+| Print proxy diagnostics (`CONF_proxy_log_to_term`) | Radio | COMPLETE | reconnect | M12: `spb_backends_test` (SOCKS 4/5, HTTP with 407 then Basic, Telnet command, local command, exclusions), SSH jump host `test_ssh_jump_proxy` and Swift `ProxyTests`; patch 0010 |
 
 ## Connection → SSH
 
@@ -224,8 +224,8 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Remote command (`CONF_remote_cmd`) | Edit box (single line, as config.c) | COMPLETE | reconnect | |
 | Don't start a shell (`CONF_ssh_no_shell`) | Checkbox | COMPLETE | reconnect | Useful for tunnel-only sessions |
 | Enable compression (`CONF_compression`) | Checkbox | COMPLETE | runtime | SSH-2: triggers an immediate rekey (`ssh2_transport_reconfigure`). Hidden mid-session on SSH-1 |
-| Share SSH connections (`CONF_ssh_connection_sharing`, `_upstream`, `_downstream`) | Checkboxes | NOT STARTED | reconnect | Unix sharing via `unix/sharing.c` (Unix-domain socket in a private dir) |
-| SSH protocol version (`CONF_sshprot`) | Radio 2 / 1 (SSH-1 hidden behind "legacy") | NOT STARTED | reconnect | |
+| Share SSH connections (`CONF_ssh_connection_sharing`, `_upstream`, `_downstream`) | Checkboxes | COMPLETE | reconnect | M12: `test_connection_sharing` (downstream reuse, upstream close warning) |
+| SSH protocol version (`CONF_sshprot`) | Radio 2 / 1 (SSH-1 hidden behind "legacy") | COMPLETE | reconnect | M12 |
 
 ## Connection → SSH → Kex / Host keys / Cipher
 
@@ -238,8 +238,8 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Max data before rekey (`CONF_ssh_rekey_data`) | Text field (e.g. `1G`) | COMPLETE | runtime | |
 | Host key algorithm order (`CONF_ssh_hklist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | future | Next rekey |
 | Prefer algorithms with known host key (`CONF_ssh_prefer_known_hostkeys`) | Checkbox | COMPLETE | future | Next rekey |
-| Manually configured host keys (`CONF_ssh_manual_hostkeys`) | List + Add/Remove | NOT STARTED | reconnect | |
-| Configure host CAs | Separate CA manager window (`host_ca_*` storage API) | NOT STARTED | runtime | Global store, not per-session; button shown mid-session |
+| Manually configured host keys (`CONF_ssh_manual_hostkeys`) | List + Add/Remove | COMPLETE | reconnect | M12: `test_manual_host_keys`, Swift `ManualHostKeyTests` |
+| Configure host CAs | Separate CA manager window (`host_ca_*` storage API) | COMPLETE | runtime | M12 (D-037): CA window from the Host keys panel; `test_host_cas`, Swift `HostCATests` |
 | Cipher order (`CONF_ssh_cipherlist`) | Reorderable list (Up / Down) with the warn-below line | COMPLETE | runtime | Change forces a rekey. Change forces a rekey (tested live, M07) |
 | Enable legacy single-DES (`CONF_ssh2_des_cbc`) | Checkbox | COMPLETE | runtime | Forces a rekey |
 
@@ -250,10 +250,10 @@ NOT STARTED rows, "macOS implementation" is the *planned* mapping.
 | Display pre-auth banner (`CONF_ssh_show_banner`) | Checkbox | COMPLETE | reconnect | Tested against uppity (M09) |
 | Bypass authentication (`CONF_ssh_no_userauth`) | Checkbox | COMPLETE | reconnect | |
 | Disconnect if trivial auth (`CONF_ssh_no_trivial_userauth`) | Checkbox | COMPLETE | reconnect | |
-| Attempt auth using Pageant (`CONF_tryagent`) | Checkbox "Attempt authentication using SSH agent" | PARTIAL | reconnect | Uses `SSH_AUTH_SOCK` (macOS/OpenSSH agent). Pageant pipe N/A. Not yet tested with an agent holding a key |
+| Attempt auth using Pageant (`CONF_tryagent`) | Checkbox "Attempt authentication using SSH agent" | COMPLETE | reconnect | Uses `SSH_AUTH_SOCK` (macOS/OpenSSH agent); Pageant pipe N/A. M12: `test_agent` with a real `ssh-agent` |
 | Attempt TIS/CryptoCard (SSH-1) (`CONF_try_tis_auth`) | Checkbox (legacy) | COMPLETE | reconnect | |
 | Attempt keyboard-interactive (`CONF_try_ki_auth`) | Checkbox | COMPLETE | reconnect | Tested against uppity (M04) |
-| Allow agent forwarding (`CONF_agentfwd`) | Checkbox | PARTIAL | reconnect | Setting only; forwarding not yet tested |
+| Allow agent forwarding (`CONF_agentfwd`) | Checkbox | COMPLETE | reconnect | M12: `test_agent` (forwarded agent used on the server) |
 | Allow username changes (`CONF_change_username`) | Checkbox | COMPLETE | reconnect | |
 | Private key file (`CONF_keyfile`) | Edit box + Browse… (NSOpenPanel) | COMPLETE | reconnect | PPK + OpenSSH formats via upstream. PPK files (upstream; OpenSSH keys must be converted with puttygen, as in PuTTY). Unencrypted and passphrase-protected keys tested against uppity (M09); the passphrase is asked in the terminal |
 | Certificate (`CONF_detached_cert`) | Edit box + Browse… | COMPLETE | reconnect | |
@@ -310,6 +310,9 @@ are in the tables above since M06.
 
 ## Process for keeping this complete
 
-M12 adds a unit test that enumerates `conf_key_info[]` through the bridge
-and fails if any key is missing from this document's key list. This keeps
-the matrix exhaustive across upstream updates.
+Since M12, the Swift test `ParityTests.everyConfKeyIsDocumented` reads
+the vendored `conf.h` (whose `CONF_OPTION` list generates
+`conf_key_info[]`) and fails if any key is not named here, as
+`` `CONF_name` ``, a `` `CONF_family_*` `` prefix, or a `` `_suffix` ``
+following a `CONF_` name on the same line. This keeps the matrix
+exhaustive across upstream updates.

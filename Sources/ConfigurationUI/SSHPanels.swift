@@ -1,8 +1,7 @@
 import PuTTYBridge
 import SwiftUI
 
-// Connection/SSH and Connection/SSH/Tunnels (M08), as config.c. The rest
-// of the SSH panels (Kex, Host keys, Cipher, Auth, ...) arrive with M09.
+// Connection/SSH and Connection/SSH/Tunnels (M08, M12), as config.c.
 
 // MARK: - Connection/SSH
 
@@ -32,6 +31,24 @@ struct SSHPanel: View {
                                         keyword: .sshNoShell)
                     }
                     CheckboxSetting(model: model, label: "Enable compression", keyword: .compression)
+                    if !model.isMidSession {
+                        RadioSetting(model: model, label: "SSH protocol version:",
+                                     keyword: .sshProtocolVersion,
+                                     options: [("2", "3"), ("1 (INSECURE)", "0")])
+                    }
+                }
+            }
+            if !model.isMidSession {
+                // unix/sharing.c: a Unix-domain socket in a private
+                // directory under /tmp, as GTK PuTTY.
+                SettingsGroup(title: "Sharing an SSH connection between PuTTY tools") {
+                    CheckboxSetting(model: model, label: "Share SSH connections if possible",
+                                    keyword: .connectionSharing)
+                    Text("Permitted roles in a shared connection:")
+                    CheckboxSetting(model: model, label: "Upstream (connecting to the real server)",
+                                    keyword: .connectionSharingUpstream)
+                    CheckboxSetting(model: model, label: "Downstream (connecting to the upstream PuTTY)",
+                                    keyword: .connectionSharingDownstream)
                 }
             }
         }

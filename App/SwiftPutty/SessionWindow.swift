@@ -62,7 +62,7 @@ struct SessionWindow: View {
     }
 
     private var session: some View {
-        TerminalSessionView(controller: controller)
+        TerminalSessionView(controller: controller, contextMenu: SessionContextMenu.make)
             .frame(minWidth: 160, minHeight: 80)
             .navigationTitle(windowTitle)
             .task { connect() }
@@ -241,4 +241,33 @@ struct SessionWindow: View {
 /// A window reference that does not keep the window alive.
 final class WeakWindow {
     weak var window: NSWindow?
+}
+
+/// GTK PuTTY's window menu, shown by a right-click that asks for it:
+/// copies of the menu bar's own items (so they act on this window), in
+/// GTK's order: New Session, the Session menu, Copy / Paste / Copy All,
+/// About.
+enum SessionContextMenu {
+    @MainActor
+    static func make() -> NSMenu? {
+        guard let main = NSApp.mainMenu else { return nil }
+        let menu = NSMenu(title: "SwiftPutty")
+        func add(_ item: NSMenuItem?) {
+            if let copy = item?.copy() as? NSMenuItem { menu.addItem(copy) }
+        }
+        let file = main.items.first { $0.submenu?.item(withTitle: "New Session…") != nil }?.submenu
+        add(file?.item(withTitle: "New Session…"))
+        for item in main.item(withTitle: "Session")?.submenu?.items ?? [] {
+            add(item)
+        }
+        menu.addItem(.separator())
+        if let edit = main.item(withTitle: "Edit")?.submenu {
+            for title in ["Copy", "Paste", "Copy All to Clipboard"] {
+                add(edit.item(withTitle: title))
+            }
+        }
+        menu.addItem(.separator())
+        add(main.items.first?.submenu?.item(withTitle: "About SwiftPutty"))
+        return menu
+    }
 }

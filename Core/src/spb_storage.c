@@ -2,10 +2,11 @@
  * spb_storage.c - the saved-session half of PuTTY's storage.h API.
  *
  * SwiftPutty keeps named sessions in its own versioned store on the Swift
- * side (docs/DECISIONS.md D-004), so the C core never opens a session by
- * name. Instead, the bridge hands PuTTY's load_open_settings() and
- * save_open_settings() handles that read and write an spb_settings
- * keyword map. Values are encoded exactly as upstream's Unix session
+ * side (docs/DECISIONS.md D-004), so the C core never writes one, and
+ * reads one by name only through the frontend's lookup (API v10; PuTTY
+ * does that for SSH proxies). Otherwise the bridge hands PuTTY's
+ * load_open_settings() and save_open_settings() handles that read and
+ * write an spb_settings keyword map. Values are encoded exactly as upstream's Unix session
  * files encode them (unix/storage.c), so a map is interchangeable with a
  * PuTTY ~/.putty/sessions file.
  *
@@ -20,7 +21,18 @@
 
 struct settings_r {
     const spb_settings *settings;
+    spb_settings *owned;               /* freed on close (named sessions) */
 };
+
+static _Atomic(spb_saved_session_lookup) lookup_fn;
+static _Atomic(void *) lookup_ctx;
+
+void spb_core_set_saved_session_lookup(spb_saved_session_lookup lookup,
+                                       void *ctx)
+{
+    atomic_store(&lookup_ctx, ctx);
+    atomic_store(&lookup_fn, lookup);
+}
 
 struct settings_w {
     spb_settings *settings;
@@ -34,6 +46,7 @@ settings_r *spb_settings_reader(const spb_settings *settings)
 {
     settings_r *handle = snew(settings_r);
     handle->settings = settings;
+    handle->owned = NULL;
     return handle;
 }
 
@@ -53,9 +66,20 @@ settings_w *open_settings_w(const char *sessionname, char **errmsg)
     return NULL;
 }
 
+/* PuTTY's NULL or empty name means "Default Settings" (unix/storage.c). */
 settings_r *open_settings_r(const char *sessionname)
 {
-    return NULL;                       /* behaves as "no such session" */
+    spb_saved_session_lookup lookup = atomic_load(&lookup_fn);
+    if (!lookup)
+        return NULL;                   /* behaves as "no such session" */
+    spb_settings *found = lookup(atomic_load(&lookup_ctx),
+                                 sessionname && *sessionname ?
+                                 sessionname : "Default Settings");
+    if (!found)
+        return NULL;
+    settings_r *handle = spb_settings_reader(found);
+    handle->owned = found;
+    return handle;
 }
 
 void del_settings(const char *sessionname)
@@ -171,5 +195,7 @@ FontSpec *read_setting_fontspec(settings_r *handle, const char *key)
 
 void close_settings_r(settings_r *handle)
 {
+    if (handle)
+        spb_settings_free(handle->owned);
     sfree(handle);                     /* sfree(NULL) is a no-op */
 }

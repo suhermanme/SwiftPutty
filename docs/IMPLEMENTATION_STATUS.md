@@ -14,12 +14,71 @@
 | **M09** | SSH authentication and connection parity | **COMPLETE** (2026-10-15) |
 | **M10** | Event log and session operations | **COMPLETE** (2026-10-15) |
 | **M11** | Additional PuTTY backends | **COMPLETE** (2026-10-15) |
-| M12 | Configuration parity pass | NOT STARTED |
+| **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
 | M13 | Security and reliability hardening | NOT STARTED |
 | M14 | Performance pass | NOT STARTED |
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M12 — Configuration parity pass
+
+**Delivered** (bridge API v11)
+
+- **Connection/Proxy**: every field, in upstream's type order. SOCKS 4/5,
+  HTTP, Telnet command and local command proxies, with exclusions, all
+  upstream code. **SSH jump hosts** through saved sessions: the core asks
+  the frontend's store by name (`spb_core_set_saved_session_lookup`,
+  D-036), so PuTTY's `do_defaults(name)` sees SwiftPutty's sessions.
+- **Connection/Data**: environment variables. **SSH**: protocol
+  version, connection sharing (with the upstream's close warning),
+  manually configured host keys, and a **host CA** window over upstream's
+  storage (`spb_hostca.c`, D-037; `ca-config.c` not linked).
+- **Agent authentication and agent forwarding** tested with a real
+  `ssh-agent`.
+- **Terminal/Window**: printer (an `lpr -P` command per macOS printer),
+  "Action of mouse buttons" with the terminal's context menu (D-038),
+  bold/wide/bold-wide fonts and shadow bold, variable-pitch font filter,
+  "Use system colours" following light/dark mode, "When window is
+  resized" and the full-screen scrollbar, and **Copy as RTF**: the bridge
+  hands over styled runs as `win_clip_write` decides them and the view
+  writes RTF beside the text (D-039).
+- **Upstream patches**: 0010 (an HTTP proxy's blank line ending the
+  headers waited for another byte: a 407 stalled and client-first
+  protocols hung after a 200); 0011 (every proxied connection leaked its
+  Conf); 0012 (Telnet and local proxy commands were formatted twice,
+  leaking the first, which can hold the proxy password); 0013 (the proxy
+  negotiator's `reconnect` flag was never initialised; found by UBSan).
+  0011 and 0012 were found by `leaks --atExit`.
+- **Parity document checked**: `ParityTests` fails if any Conf key of
+  the vendored `conf.h` is missing from CONFIGURATION_PARITY.md.
+- `spb_ssh_test`: the encrypted-key steps allow 90 s, since Argon2 under
+  TSan overran 20 s once on a loaded host.
+
+**Tests and results** (clean build, `scripts/test-all.sh --clean`, arm64
+host, Xcode 27.0 / Swift 6.4 / CMake 4.4.3)
+
+| Check | Result |
+|---|---|
+| Core build, arm64 + x86_64 (RelWithDebInfo), patches 0001–0013 | PASS |
+| C tests: `spb_backends_test` proxies (SOCKS 4/5, HTTP 407 then Basic, Telnet and local commands, exclusions); `spb_ssh_test` jump host, environment, connection sharing, manual host keys, host CAs, agent; `spb_terminal_test` system colours, printing, Copy as RTF | PASS (6 programs) |
+| `leaks --atExit`: all five C test programs | PASS (0 leaks) |
+| C tests under ASan + UBSan / TSan (Debug) | PASS |
+| `swift test` (116 tests, 27 suites; new: `ParityTests`, `ProxyTests`, `ManualHostKeyTests`, `HostCATests`, fonts and shadow bold, system colours, resize actions, Copy as RTF) | PASS |
+| `swift test --sanitize=address` / `--sanitize=thread` | PASS |
+| App Debug build; Release build, universal | PASS |
+
+**Limitations / not done**
+
+- **Not clicked through by hand** in this milestone: the new panels,
+  the context menu and the host CA window are covered by the tests
+  above only.
+- **Command to run before connection** (`PreConnectCommand`) is not
+  offered: it runs a local command and is left for M13's security review.
+- **Proxy password** is saved in the session file in plain text, as
+  PuTTY does; keeping it out of the file (Keychain) is planned for M13.
+- GSSAPI and X11 forwarding stay PARTIAL (no Kerberos or XQuartz here).
+- Patches 0010–0013 are not yet reported upstream.
 
 ## M11 — Additional PuTTY backends
 

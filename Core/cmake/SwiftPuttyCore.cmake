@@ -92,6 +92,7 @@ function(swiftputty_define_core)
     # SwiftPutty bridge
     ${B}/src/spb_core.c
     ${B}/src/spb_eventloop.c
+    ${B}/src/spb_hostca.c
     ${B}/src/spb_input.c
     ${B}/src/spb_platform.c
     ${B}/src/spb_seat.c

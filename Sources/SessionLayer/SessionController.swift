@@ -10,6 +10,10 @@ public protocol SessionTerminalDelegate: AnyObject {
     func terminalDidUpdate(_ controller: SessionController)
     func terminal(_ controller: SessionController, ringBell mode: Int32)
     func terminal(_ controller: SessionController, write text: String, to clipboard: PuTTYClipboard)
+    /// A styled copy (PuTTY's Copy as RTF). The default joins the runs'
+    /// text, so a delegate that does not style still gets the plain text.
+    func terminal(_ controller: SessionController, write runs: [PuTTYStyleRun],
+                  to clipboard: PuTTYClipboard)
     /// Answer with `PuTTYSession.paste(_:)`.
     func terminal(_ controller: SessionController, requestsPasteFrom clipboard: PuTTYClipboard)
     func terminal(_ controller: SessionController, requestsResizeTo columns: Int, rows: Int)
@@ -17,6 +21,13 @@ public protocol SessionTerminalDelegate: AnyObject {
     /// size, scrollbar, window options) may have changed.
     func terminal(_ controller: SessionController, settingsChangedFrom old: PuTTYSettings,
                   to new: PuTTYSettings)
+}
+
+extension SessionTerminalDelegate {
+    public func terminal(_ controller: SessionController, write runs: [PuTTYStyleRun],
+                         to clipboard: PuTTYClipboard) {
+        terminal(controller, write: runs.map(\.text).joined(), to: clipboard)
+    }
 }
 
 /// What happened to the edited forwardings of a Change Settings.
@@ -405,6 +416,8 @@ public final class SessionController {
             terminalDelegate?.terminal(self, ringBell: mode)
         case .clipboardWrite(let clipboard, let text):
             terminalDelegate?.terminal(self, write: text, to: clipboard)
+        case .clipboardWriteStyled(let clipboard, let runs):
+            terminalDelegate?.terminal(self, write: runs, to: clipboard)
         case .pasteRequested(let clipboard):
             terminalDelegate?.terminal(self, requestsPasteFrom: clipboard)
         case .resizeRequested(let columns, let rows):

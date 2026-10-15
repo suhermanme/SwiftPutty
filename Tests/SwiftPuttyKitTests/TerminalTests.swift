@@ -155,6 +155,38 @@ extension KitTests {
             session.mouse(.left, .drag, column: 8, row: 0)
             session.mouse(.left, .release, column: 8, row: 0)
             #expect(await waitUntil { TerminalSelectionBuffer.text == "copy this" })
+            #expect(term.view.lastSelectionRTF == nil)      // PasteRTF is off
+        }
+
+        /// Copy as RTF: the selection keeps its colours, bold and underline;
+        /// text in the default colours carries none.
+        @Test func copyAsRTF() async throws {
+            let term = try ScriptedTerminal(settings: ["PasteRTF": "1", "BoldAsColour": "2"])
+            defer { term.close() }
+            term.peer.send("plain \u{1B}[1;31mbold\u{1B}[0m \u{1B}[4mund\u{1B}[0m\r\n")
+            #expect(await term.waitForRow(0, "plain bold und"))
+
+            let session = term.controller.session!
+            session.mouse(.left, .click, column: 0, row: 0)
+            session.mouse(.left, .drag, column: 13, row: 0)
+            session.mouse(.left, .release, column: 13, row: 0)
+            #expect(await waitUntil { term.view.lastSelectionRTF != nil })
+            #expect(TerminalSelectionBuffer.text == "plain bold und")
+
+            let rtf = try #require(term.view.lastSelectionRTF)
+            let copied = try #require(NSAttributedString(rtf: rtf, documentAttributes: nil))
+            #expect(copied.string == "plain bold und")
+            func attributes(at index: Int) -> [NSAttributedString.Key: Any] {
+                copied.attributes(at: index, effectiveRange: nil)
+            }
+            #expect(attributes(at: 0)[.foregroundColor] == nil)
+            let bold = attributes(at: 6)
+            let red = try #require((bold[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB))
+            #expect(abs(red.redComponent - 1) < 0.01 && abs(red.greenComponent - 85.0 / 255) < 0.01)
+            let boldFont = try #require(bold[.font] as? NSFont)
+            #expect(boldFont.fontDescriptor.symbolicTraits.contains(.bold))
+            #expect(attributes(at: 11)[.underlineStyle] as? Int == NSUnderlineStyle.single.rawValue)
+            #expect(attributes(at: 11)[.foregroundColor] == nil)
         }
 
         @Test func scrollbackFollowsTheScroller() async throws {
@@ -208,6 +240,84 @@ extension KitTests {
             #expect(close(pixel(b + w * 1.5, b + h * 0.25), 0xFFFFFF))  // block's top half
             #expect(close(pixel(b + w * 1.5, b + h * 0.85), 0x000000))  // bottom half empty
             #expect(close(pixel(b + w * 5.5, b + h * 5.5), 0x000000))   // background
+        }
+
+        /// GTK PuTTY's shadow bold: a bold glyph is the ordinary glyph
+        /// drawn again ShadowBoldOffset points to the right.
+        @Test func shadowBoldWidensBoldGlyphs() async throws {
+            func inkWidth(shadow: Bool) async throws -> Int {
+                let term = try ScriptedTerminal(settings: [
+                    "BoldAsColour": "0", "ShadowBold": shadow ? "1" : "0", "ShadowBoldOffset": "3"])
+                defer { term.close() }
+                term.peer.send("\u{1B}[1mI\u{1B}[0m")
+                #expect(await term.wait { $0.cell(column: 0, row: 0).scalars == ["I"] })
+                let view = term.view
+                view.layoutSubtreeIfNeeded()
+                let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+                view.cacheDisplay(in: view.bounds, to: rep)
+                let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+                let font = view.renderer.font, b = view.border
+                let y = Int((b + font.cellHeight / 2) * scale)
+                var columns = 0
+                for x in Int(b * scale)..<Int((b + font.cellWidth * 2) * scale) {
+                    let c = rep.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+                    if c.redComponent + c.greenComponent + c.blueComponent > 1.2 { columns += 1 }
+                }
+                return columns
+            }
+            let plain = try await inkWidth(shadow: false)
+            let shadowed = try await inkWidth(shadow: true)
+            #expect(plain > 0)
+            #expect(shadowed > plain)
+        }
+
+        /// "Use system colours": the window's appearance decides the
+        /// default colours, and a change of appearance follows.
+        @Test func systemColoursFollowTheAppearance() async throws {
+            let term = try ScriptedTerminal(settings: ["UseSystemColours": "1"])
+            defer { term.close() }
+            func brightness(_ rgb: UInt32) -> Int {
+                Int((rgb >> 16) & 0xFF) + Int((rgb >> 8) & 0xFF) + Int(rgb & 0xFF)
+            }
+            term.window.appearance = NSAppearance(named: .aqua)
+            term.peer.send("light")
+            #expect(await term.wait { brightness($0.defaultBackground) > 3 * 200 })
+            #expect(brightness(term.screen.defaultForeground) < 3 * 100)
+            term.window.appearance = NSAppearance(named: .darkAqua)
+            term.peer.send(" dark")
+            #expect(await term.wait { brightness($0.defaultBackground) < 3 * 80 })
+            #expect(brightness(term.screen.defaultForeground) > 3 * 150)
+        }
+
+        /// "When window is resized": change the font size keeps the rows
+        /// and columns; forbid makes the window fixed and refuses the
+        /// application's resize requests.
+        @Test func resizeActions() async throws {
+            let font = try ScriptedTerminal(settings: ["LockSize": "2"])
+            defer { font.close() }
+            #expect(await font.wait { $0.columns == 80 && $0.rows == 24 })
+            let before = font.view.renderer.font.font.pointSize
+            font.window.setContentSize(NSSize(width: font.view.frame.width * 1.5,
+                                              height: font.view.frame.height * 1.5))
+            #expect(font.view.renderer.font.font.pointSize > before)
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(font.screen.columns == 80 && font.screen.rows == 24)
+
+            let forbid = try ScriptedTerminal(settings: ["LockSize": "1"])
+            defer { forbid.close() }
+            #expect(await forbid.wait { $0.columns == 80 })
+            forbid.view.viewDidMoveToWindow()            // apply window options
+            #expect(!forbid.window.styleMask.contains(.resizable))
+            let frame = forbid.window.frame
+            forbid.view.terminal(forbid.controller, requestsResizeTo: 132, rows: 24)
+            #expect(forbid.window.frame == frame)
+
+            // The default: an application's request resizes the window.
+            let normal = try ScriptedTerminal()
+            defer { normal.close() }
+            #expect(await normal.wait { $0.columns == 80 })
+            normal.view.terminal(normal.controller, requestsResizeTo: 100, rows: 30)
+            #expect(await normal.wait { $0.columns == 100 && $0.rows == 30 })
         }
 
         @Test func sessionEndLeavesTheScreen() async throws {
@@ -325,6 +435,19 @@ extension KitTests {
     @Suite("Terminal font")
     struct TerminalFontTests {
         @Test func parsesPuTTYFontNames() {
+            // Window/Fonts: configured fonts per cell kind; derived ones
+            // otherwise; shadow bold draws bold with the ordinary fonts.
+            let configured = TerminalFont(spec: TerminalFontSpec(
+                fontName: "Menlo-Regular 12", boldFontName: "Courier-Bold 12",
+                wideFontName: "Monaco 12"))
+            #expect(configured.font(bold: true, wide: false).fontName == "Courier-Bold")
+            #expect(configured.font(bold: false, wide: true).fontName == "Monaco")
+            let derived = TerminalFont(spec: TerminalFontSpec(fontName: "Menlo-Regular 12"))
+            #expect(derived.font(bold: true, wide: false).fontName == "Menlo-Bold")
+            #expect(derived.font(bold: false, wide: true).fontName == "Menlo-Regular")
+            #expect(derived.font(bold: true, wide: true).fontName == "Menlo-Bold")
+            let shadow = TerminalFont(spec: TerminalFontSpec(fontName: "Menlo-Regular 12", shadowBold: true))
+            #expect(shadow.font(bold: true, wide: false).fontName == "Menlo-Regular")
             #expect(TerminalFont(puttyFontName: "Menlo-Regular 12").font.pointSize == 12)
             #expect(TerminalFont(puttyFontName: "Menlo-Bold 15").font.fontName == "Menlo-Bold")
             #expect(TerminalFont(puttyFontName: "client:Menlo-Regular 10").font.pointSize == 10)

@@ -1,0 +1,63 @@
+SwiftPutty local patch 0012
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+Telnet and local proxies: format the proxy command a second time only
+after prompting.
+
+Both negotiators format the command, and when it needs a user name or
+password they don't have, discard it, prompt, and format it again with
+the answers. The second format was outside the prompting branch, so it
+also ran when no prompt was needed and overwrote (leaked) the first
+result, which still held the proxy password when one was configured.
+Found by `leaks --atExit` on Core/tests/spb_backends_test.c. The second
+format now happens only after the prompts, as its comment says.
+
+--- a/proxy/telnet.c
++++ b/proxy/telnet.c
+@@ -148,14 +148,14 @@
+ 
+             free_prompts(s->prompts);
+             s->prompts = NULL;
+-        }
+ 
+-        /*
+-         * Now format the command a second time, with the results of
+-         * those prompts written into s->conf.
+-         */
+-        s->formatted_cmd = format_telnet_command(
+-            pn->ps->remote_addr, pn->ps->remote_port, s->conf, NULL);
++            /*
++             * Now format the command a second time, with the results of
++             * those prompts written into s->conf.
++             */
++            s->formatted_cmd = format_telnet_command(
++                pn->ps->remote_addr, pn->ps->remote_port, s->conf, NULL);
++        }
+     }
+ 
+     /*
+--- a/proxy/local.c
++++ b/proxy/local.c
+@@ -185,14 +185,14 @@
+ 
+             free_prompts(lp->prompts);
+             lp->prompts = NULL;
+-        }
+ 
+-        /*
+-         * Now format the command a second time, with the results of
+-         * those prompts written into lp->conf.
+-         */
+-        lp->formatted_cmd = format_telnet_command(
+-            lp->addr, lp->port, lp->conf, NULL);
++            /*
++             * Now format the command a second time, with the results of
++             * those prompts written into lp->conf.
++             */
++            lp->formatted_cmd = format_telnet_command(
++                lp->addr, lp->port, lp->conf, NULL);
++        }
+     }
+ 
+     /*

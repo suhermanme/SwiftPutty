@@ -865,6 +865,11 @@ duplicate, closed, each with its `CONF_portfwd` key and value) and
 patches 0007 / 0008 for H-1 / H-2 (§5.6). Staging (§6.4) is implemented
 in `SessionController.applyChangeSettings(_:portForwardingEdits:)`.
 
+M12 (API v10–v11) adds the saved-session lookup for PuTTY's own
+`do_defaults` (D-036), host CA storage functions (D-037), manual host key
+canonicalisation, `spb_session_set_system_colours`, and the
+`clipboard_write_styled` callback for Copy as RTF (D-039).
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |

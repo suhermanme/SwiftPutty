@@ -193,3 +193,13 @@ void spb_settings_normalise(spb_settings *settings)
     spb_settings_save_from_conf(settings, conf);
     conf_free(conf);
 }
+
+char *spb_canonical_manual_host_key(const char *text)
+{
+    char *key = dupstr(text ? text : "");
+    if (!validate_manual_hostkey(key)) {
+        sfree(key);
+        return NULL;
+    }
+    return key;
+}

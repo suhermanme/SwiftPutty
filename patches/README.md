@@ -23,3 +23,7 @@ Each patch:
 | `0007-rportfwd-cancel-pending-reply.patch` | Use after free when a remote forwarding is removed before the server answers (H-1); leaked outstanding global requests at teardown | Not yet reported; should be (memory safety) |
 | `0008-portfwd-duplicate-rportfwd-free.patch` | Use after free after a duplicate remote forwarding (H-2) | Not yet reported; should be (memory safety) |
 | `0009-rlogin-free-username-prompt.patch` | The Rlogin user name prompt leaked once answered | Not yet reported; suitable for upstream |
+| `0010-http-proxy-blank-line-completes-headers.patch` | An HTTP proxy's response was not complete until a byte after it arrived: a body-less 407 stalled, and a 200 hung client-first protocols | Not yet reported; should be |
+| `0011-proxy-socket-free-conf.patch` | Each proxied connection leaked its copy of the Conf | Not yet reported; suitable for upstream |
+| `0012-proxy-command-format-once.patch` | Telnet and local proxies formatted their command twice when no prompt was needed, leaking the first (which can hold the proxy password) | Not yet reported; suitable for upstream |
+| `0013-proxy-negotiator-init-reconnect.patch` | The proxy negotiator's `reconnect` flag was never initialised, so a proxied connection could reconnect to the proxy at random | Not yet reported; should be |

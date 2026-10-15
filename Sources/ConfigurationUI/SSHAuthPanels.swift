@@ -121,17 +121,71 @@ struct KexPanel: View {
 
 struct HostKeysPanel: View {
     let model: ConfigurationModel
+    @State private var caEditor: HostCAEditor?
     static let names = [
         "ed25519": "Ed25519", "ed448": "Ed448", "ecdsa": "ECDSA", "dsa": "DSA", "rsa": "RSA",
         "WARN": "-- warn below here --",
     ]
 
     var body: some View {
-        SettingsGroup(title: "Host key algorithm preference") {
-            PreferenceListSetting(model: model, label: "Algorithm selection policy:",
-                                  keyword: .hostKey, names: Self.names)
-            CheckboxSetting(model: model, label: "Prefer algorithms for which a host key is known",
-                            keyword: .preferKnownHostKeys)
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsGroup(title: "Host key algorithm preference") {
+                PreferenceListSetting(model: model, label: "Algorithm selection policy:",
+                                      keyword: .hostKey, names: Self.names)
+                CheckboxSetting(model: model, label: "Prefer algorithms for which a host key is known",
+                                keyword: .preferKnownHostKeys)
+            }
+            if !model.isMidSession {
+                ManualHostKeysSettings(model: model)
+            }
+            // config.c: the CA list is not per session, so this is
+            // offered mid-session too.
+            SettingsGroup(title: "Configure trusted certification authorities") {
+                Button("Configure host CAs") { caEditor = HostCAEditor(beep: { NSSound.beep() }) }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .sheet(item: $caEditor) { editor in
+            HostCAView(editor: editor) { caEditor = nil }
+        }
+    }
+}
+
+extension HostCAEditor: Identifiable {
+    public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+}
+
+/// config.c's "Manually configure host keys for this connection".
+private struct ManualHostKeysSettings: View {
+    @Bindable var model: ConfigurationModel
+    @State private var selection: Int?
+
+    var body: some View {
+        SettingsGroup(title: "Manually configure host keys for this connection") {
+            Text("Host keys or fingerprints to accept:")
+            HStack(alignment: .top) {
+                List(selection: $selection) {
+                    ForEach(Array(model.manualHostKeys.enumerated()), id: \.offset) { index, key in
+                        Text(key).font(.system(.body, design: .monospaced)).lineLimit(1)
+                            .truncationMode(.middle).tag(index)
+                    }
+                }
+                .listStyle(.bordered(alternatesRowBackgrounds: false))
+                .frame(height: 3 * 24)
+                Button("Remove") {
+                    model.removeManualHostKey(at: selection)
+                    selection = nil
+                }
+                .buttonStyle(.bordered)
+            }
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Key")
+                    PlainTextField(label: "Key", text: $model.manualHostKeyText)
+                }
+                Button("Add key") { model.addManualHostKey() }
+                    .buttonStyle(.bordered)
+            }
         }
     }
 }

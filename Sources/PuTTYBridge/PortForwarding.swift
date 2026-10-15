@@ -159,18 +159,24 @@ extension PuTTYSettings {
     }
 
     public static func parsePortForwardings(_ text: String) -> [PortForwarding] {
-        var result: [PortForwarding] = []
+        parseMap(text).map { entry($0.key, $0.value) }
+    }
+
+    /// A map setting (`PortForwardings`, `Environment`), as settings.c's
+    /// gppmap reads it: entries separated by commas, key and value by the
+    /// first `=`, a backslash escaping the next character.
+    public static func parseMap(_ text: String) -> [(key: String, value: String)] {
+        var result: [(key: String, value: String)] = []
         var iterator = text.makeIterator()
-        var key = "", value = "", inValue = false, atEnd = false
-        while !atEnd {
+        var key = "", value = "", inValue = false
+        while true {
             guard let c = iterator.next() else {
-                atEnd = true
-                if !key.isEmpty || inValue { result.append(entry(key, value)) }
+                if !key.isEmpty || inValue { result.append((key, value)) }
                 break
             }
             switch c {
             case ",":
-                result.append(entry(key, value))
+                result.append((key, value))
                 key = ""; value = ""; inValue = false
             case "=" where !inValue:
                 inValue = true
@@ -185,6 +191,40 @@ extension PuTTYSettings {
         return result
     }
 
+    /// As settings.c's wmap writes a map.
+    public static func formatMap(_ entries: [(key: String, value: String)]) -> String {
+        entries.map { escapedMapField($0.key) + "=" + escapedMapField($0.value) }.joined(separator: ",")
+    }
+
+    private static func escapedMapField(_ s: String) -> String {
+        var out = ""
+        for c in s {
+            if c == "=" || c == "," || c == "\\" { out.append("\\") }
+            out.append(c)
+        }
+        return out
+    }
+
+    /// The `SSHManualHostKeys` setting: host keys or fingerprints to
+    /// accept, in PuTTY's order. Saved as keys only (wmap without values).
+    public var manualHostKeys: [String] {
+        get { Self.parseMap(self["SSHManualHostKeys"] ?? "").map(\.key) }
+        set {
+            let sorted = newValue.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
+            self["SSHManualHostKeys"] = sorted.map(Self.escapedMapField).joined(separator: ",")
+        }
+    }
+
+    /// The `Environment` setting: variables for the server, in PuTTY's
+    /// order (byte-wise by name, as its Conf keeps them).
+    public var environmentVariables: [(name: String, value: String)] {
+        get { Self.parseMap(self["Environment"] ?? "").map { ($0.key, $0.value) } }
+        set {
+            let sorted = newValue.sorted { Array($0.name.utf8).lexicographicallyPrecedes(Array($1.name.utf8)) }
+            self["Environment"] = Self.formatMap(sorted.map { ($0.name, $0.value) })
+        }
+    }
+
     /// gppmap's compatibility rule: a key containing `D` is dynamic.
     private static func entry(_ key: String, _ value: String) -> PortForwarding {
         if let d = key.firstIndex(of: "D") {
@@ -196,19 +236,8 @@ extension PuTTYSettings {
     }
 
     public static func formatPortForwardings(_ forwardings: [PortForwarding]) -> String {
-        func escaped(_ s: String) -> String {
-            var out = ""
-            for c in s {
-                if c == "=" || c == "," || c == "\\" { out.append("\\") }
-                out.append(c)
-            }
-            return out
-        }
-        return forwardings.map { f in
-            if f.value == "D" {
-                return escaped(f.displayKey) + "="
-            }
-            return escaped(f.key) + "=" + escaped(f.value)
-        }.joined(separator: ",")
+        formatMap(forwardings.map { f in
+            f.value == "D" ? (f.displayKey, "") : (f.key, f.value)
+        })
     }
 }

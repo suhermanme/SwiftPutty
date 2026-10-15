@@ -8,7 +8,10 @@
  * SUPDUP (the terminal parameters as 36-bit words, the greeting up to
  * %TDNOP, the location string), and a serial line, played by a
  * pseudo-terminal (opening, line settings applied at start and changed
- * live, data both ways, a line that does not exist).
+ * live, data both ways, a line that does not exist). Proxies (M12):
+ * SOCKS 5 (no auth, password auth, host name left to the proxy), SOCKS 4,
+ * HTTP CONNECT with Basic auth, the 'Telnet' ad-hoc command, a local
+ * command, and the rules for when not to use the proxy.
  *
  * Uses only the public PuTTYBridge.h API. Exit status 0 on success.
  */
@@ -111,7 +114,7 @@ static bool peer_expect(peer *p, const void *needle, size_t n, double timeout)
             if (!memmem(p->buf, p->len, needle, n)) {
                 fprintf(stderr, "  peer did not receive %zu expected bytes; "
                         "got %zu:", n, p->len);
-                for (size_t i = 0; i < p->len && i < 64; i++)
+                for (size_t i = 0; i < p->len && i < 160; i++)
                     fprintf(stderr, " %02x", p->buf[i]);
                 fprintf(stderr, "\n");
                 return false;
@@ -665,6 +668,155 @@ static void test_serial(void)
     close(slave);
 }
 
+/* ---------- Proxies (M12) ---------- */
+
+/* A Raw session to target.invalid:4321 through a proxy the test plays;
+ * extra: more keyword/value pairs. Returns the proxy's connection. */
+static peer proxied_session(int lfd, int proxy_port, const char *method,
+                            const char *const *extra)
+{
+    char portstr[16];
+    snprintf(portstr, sizeof(portstr), "%d", proxy_port);
+    const char *pairs[40] = {
+        "Protocol", "raw", "HostName", "target.invalid", "PortNumber", "4321",
+        "ProxyMethod", method, "ProxyHost", "127.0.0.1", "ProxyPort", portstr,
+    };
+    size_t n = 12;
+    for (; extra && *extra && n < 38; extra++)
+        pairs[n++] = *extra;
+    pairs[n] = NULL;
+    open_session(pairs, NULL);
+    peer p = { .fd = accept_within(lfd, 10) };
+    CHECK(p.fd >= 0);
+    return p;
+}
+
+/* After the proxy's handshake the test is the target: data both ways,
+ * the client speaking first (as Rlogin's does). */
+static void check_tunnel(peer *p)
+{
+    CHECK(wait_rec(is_connected, 10));
+    spb_session_send(session, "up", 2);
+    CHECK(peer_expect(p, "up", 2, 3));
+    PEER_SEND(p, "via the proxy\r\n");
+    CHECK(wait_screen("via the proxy", 10));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    close(p->fd);
+}
+
+static void test_proxies(void)
+{
+    int port, lfd = listen_loopback(&port);
+    char logline[200];
+
+    /* SOCKS 5, no authentication. The host name is left to the proxy
+     * (ProxyDNS Auto), so target.invalid never needs to resolve. */
+    peer p = proxied_session(lfd, port, "2", NULL);
+    CHECK(PEER_EXPECT(&p, "\x05\x03\x00\x03\x02"));      /* none, CHAP, password */
+    PEER_SEND(&p, "\x05\x00");
+    CHECK(PEER_EXPECT(&p, "\x05\x01\x00\x03\x0e" "target.invalid" "\x10\xe1"));
+    PEER_SEND(&p, "\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
+    snprintf(logline, sizeof(logline),
+             "Connecting to SOCKS 5 proxy at 127.0.0.1 port %d", port);
+    CHECK(wait_log(logline, 10));
+    CHECK(wait_log("Leaving host lookup to proxy of \"target.invalid\"", 10));
+    check_tunnel(&p);
+
+    /* SOCKS 5 with a user name and password (RFC 1929). */
+    const char *const creds[] = { "ProxyUsername", "user", "ProxyPassword", "pass",
+                                  NULL };
+    p = proxied_session(lfd, port, "2", creds);
+    CHECK(PEER_EXPECT(&p, "\x05\x03\x00\x03\x02"));
+    PEER_SEND(&p, "\x05\x02");
+    CHECK(PEER_EXPECT(&p, "\x01\x04user\x04pass"));
+    PEER_SEND(&p, "\x01\x00");
+    CHECK(PEER_EXPECT(&p, "\x05\x01\x00\x03\x0e" "target.invalid" "\x10\xe1"));
+    PEER_SEND(&p, "\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00");
+    check_tunnel(&p);
+
+    /* SOCKS 4 to an IP address (proxying local host turned on). */
+    const char *const socks4[] = { "HostName", "127.0.0.1", "ProxyLocalhost", "1",
+                                   "ProxyUsername", "u4", NULL };
+    p = proxied_session(lfd, port, "1", socks4);
+    CHECK(PEER_EXPECT(&p, "\x04\x01\x10\xe1\x7f\x00\x00\x01u4\0"));
+    PEER_SEND(&p, "\x00\x5a\x00\x00\x00\x00\x00\x00");
+    check_tunnel(&p);
+
+    /* HTTP CONNECT: credentials only after the proxy asks for them (a
+     * 407 offering Basic), on the same connection ("user:pass"). */
+    p = proxied_session(lfd, port, "3", creds);
+    CHECK(PEER_EXPECT(&p, "CONNECT target.invalid:4321 HTTP/1.1\r\n"
+                      "Host: target.invalid:4321\r\n\r\n"));
+    PEER_SEND(&p, "HTTP/1.1 407 Proxy Authentication Required\r\n"
+              "Proxy-Authenticate: Basic realm=\"test\"\r\n"
+              "Content-Length: 0\r\n\r\n");
+    CHECK(PEER_EXPECT(&p, "CONNECT target.invalid:4321 HTTP/1.1\r\n"
+                      "Host: target.invalid:4321\r\n"
+                      "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n\r\n"));
+    PEER_SEND(&p, "HTTP/1.1 200 Connection established\r\n\r\n");
+    check_tunnel(&p);
+
+    /* 'Telnet' proxy: the ad-hoc command, with its default text. */
+    p = proxied_session(lfd, port, "4", NULL);
+    CHECK(PEER_EXPECT(&p, "connect target.invalid 4321\n"));
+    check_tunnel(&p);
+
+    /* Not proxied: local host connections (by default), and hosts in
+     * the exclusion list. The proxy hears nothing. */
+    int tport, tfd = listen_loopback(&tport);
+    char tportstr[16];
+    snprintf(tportstr, sizeof(tportstr), "%d", tport);
+    for (int round = 0; round < 2; round++) {
+        const char *const direct_local[] = { "HostName", "127.0.0.1", "PortNumber", tportstr,
+                                             NULL };
+        const char *const direct_excluded[] = { "HostName", "127.0.0.1", "PortNumber", tportstr,
+                                                "ProxyLocalhost", "1",
+                                                "ProxyExcludeList", "127.0.0.*", NULL };
+        char portstr[16];
+        snprintf(portstr, sizeof(portstr), "%d", port);
+        const char *pairs[24] = { "Protocol", "raw", "ProxyMethod", "2",
+                                  "ProxyHost", "127.0.0.1", "ProxyPort", portstr };
+        size_t n = 8;
+        for (const char *const *e = round ? direct_excluded : direct_local; *e; e++)
+            pairs[n++] = *e;
+        pairs[n] = NULL;
+        open_session(pairs, NULL);
+        peer t = { .fd = accept_within(tfd, 10) };
+        CHECK(t.fd >= 0);
+        CHECK(wait_rec(is_connected, 10));
+        CHECK(accept_within(lfd, 0.3) < 0);
+        PEER_SEND(&t, "direct\r\n");
+        CHECK(wait_screen("direct", 10));
+        spb_session_close(session);
+        CHECK(wait_rec(is_final, 10));
+        release_session();
+        close(t.fd);
+    }
+    close(tfd);
+
+    /* Local proxy command: a subprogram, with %host and %port filled in,
+     * carries the connection. */
+    const char *const local[] = {
+        "ProxyMethod", "5",
+        "ProxyTelnetCommand", "printf 'local-proxy:%host:%port\\r\\n'; cat", NULL };
+    const char *pairs[16] = { "Protocol", "raw", "HostName", "target.invalid",
+                              "PortNumber", "4321" };
+    size_t n = 6;
+    for (const char *const *e = local; *e; e++)
+        pairs[n++] = *e;
+    pairs[n] = NULL;
+    open_session(pairs, NULL);
+    CHECK(wait_screen("local-proxy:target.invalid:4321", 10));
+    CHECK(wait_rec(is_connected, 10));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+
+    close(lfd);
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -687,6 +839,7 @@ int main(void)
     test_rlogin();
     test_supdup();
     test_serial();
+    test_proxies();
 
     CHECK(spb_core_barrier());
     CHECK(spb_debug_live_sessions() == 0);

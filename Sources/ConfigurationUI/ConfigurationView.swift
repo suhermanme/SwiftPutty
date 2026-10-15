@@ -3,13 +3,12 @@ import PuTTYBridge
 import SwiftUI
 
 /// The categories of PuTTY's configuration tree that SwiftPutty has so
-/// far (`config.c` `setup_config_box`; Connection/Proxy arrives with
-/// M12). Order and nesting are PuTTY's.
+/// far (`config.c` `setup_config_box`). Order and nesting are PuTTY's.
 public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable {
     case session, logging
     case terminal, keyboard, bell, features
-    case window, appearance, behaviour, translation, selection, copy, colours
-    case connection, data, ssh, kex, hostKeys, cipher, auth, credentials, gssapi, tty, x11, tunnels
+    case window, appearance, behaviour, translation, selection, copy, colours, fonts
+    case connection, data, proxy, ssh, kex, hostKeys, cipher, auth, credentials, gssapi, tty, x11, tunnels
     case bugs, moreBugs
     case serial, telnet, rlogin, supdup
 
@@ -31,8 +30,10 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .selection: "Selection"
         case .copy: "Copy"
         case .colours: "Colours"
+        case .fonts: "Fonts"
         case .connection: "Connection"
         case .data: "Data"
+        case .proxy: "Proxy"
         case .ssh: "SSH"
         case .kex: "Kex"
         case .hostKeys: "Host keys"
@@ -78,8 +79,10 @@ public enum ConfigurationCategory: String, CaseIterable, Identifiable, Sendable 
         case .selection: "Options controlling copy and paste"
         case .copy: "Options controlling copying from terminal to clipboard"
         case .colours: "Options controlling use of colours"
+        case .fonts: "Options controlling font usage"
         case .connection: "Options controlling the connection"
         case .data: "Data to send to the server"
+        case .proxy: "Options controlling proxy usage"
         case .ssh: "Options controlling SSH connections"
         case .tunnels: "Options controlling SSH port forwarding"
         case .kex: "Options controlling SSH key exchange"
@@ -196,8 +199,10 @@ public struct ConfigurationView: View {
         case .selection: SelectionPanel(model: model)
         case .copy: CopyPanel(model: model)
         case .colours: ColoursPanel(model: model)
+        case .fonts: FontsPanel(model: model)
         case .connection: ConnectionPanel(model: model)
         case .data: DataPanel(model: model)
+        case .proxy: ProxyPanel(model: model)
         case .ssh: SSHPanel(model: model)
         case .tunnels: TunnelsPanel(model: model)
         case .kex: KexPanel(model: model)
@@ -225,8 +230,9 @@ extension ConfigurationModel {
     public func shows(_ category: ConfigurationCategory) -> Bool {
         guard isMidSession else { return true }
         switch category {
-        // Connection/Data only matters to a new connection.
-        case .data: return false
+        // Connection/Data and Connection/Proxy only matter to a new
+        // connection.
+        case .data, .proxy: return false
         // DISPLAY_RECONFIGURABLE_PROTOCOL: SSH panels for SSH sessions.
         case .ssh, .tunnels: return connectionType == "ssh"
         // Re-keying makes these meaningful mid-session, except on SSH-1

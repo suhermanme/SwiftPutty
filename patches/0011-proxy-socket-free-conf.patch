@@ -1,0 +1,22 @@
+SwiftPutty local patch 0011
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+Proxy: free the proxy socket's copy of the Conf when it closes.
+
+new_connection() gives each ProxySocket its own conf_copy(), which the
+negotiators read (proxy host and port, SOCKS 5 user name and password),
+but sk_proxy_close() never frees it, so every proxied connection leaked
+a whole Conf. Found by `leaks --atExit` on Core/tests/spb_backends_test.c,
+whose sessions go through SOCKS 4/5, HTTP, Telnet and local proxies.
+
+--- a/proxy/proxy.c
++++ b/proxy/proxy.c
+@@ -103,6 +103,7 @@
+     sk_addr_free(ps->remote_addr);
+     proxy_negotiator_cleanup(ps);
+     bufchain_clear(&ps->output_from_negotiator);
++    conf_free(ps->conf);
+     sfree(ps);
+ }
+ 

@@ -1,5 +1,6 @@
 import Foundation
 import PuTTYBridgeC
+import os
 
 /// An error reported by the PuTTY bridge.
 public struct PuTTYBridgeError: Error, LocalizedError, Equatable, Sendable {
@@ -82,6 +83,37 @@ public enum PuTTYCore {
         spb_core_shutdown()
     }
 
+    /// Lets PuTTY open saved sessions by name where it does so itself: an
+    /// SSH proxy whose host name names a saved session, and "Default
+    /// Settings", which such a proxy otherwise starts from. `lookup` runs
+    /// on the core thread with the session name and returns the session's
+    /// settings, or nil if there is none; it must return promptly. Pass
+    /// nil to remove it (then no saved session exists for PuTTY).
+    public static func setSavedSessionLookup(_ lookup: (@Sendable (String) -> PuTTYSettings?)?) {
+        guard let lookup else {
+            spb_core_set_saved_session_lookup(nil, nil)
+            return
+        }
+        let box = SavedSessionLookup(lookup)
+        // The core may still be in a replaced lookup, so none is ever
+        // freed (they are set once per launch).
+        SavedSessionLookup.all.withLock { $0.append(box) }
+        spb_core_set_saved_session_lookup({ ctx, name in
+            guard let ctx, let name else { return nil }
+            let box = Unmanaged<SavedSessionLookup>.fromOpaque(ctx).takeUnretainedValue()
+            return box.lookup(String(cString: name))?.makeBridgeHandle()
+        }, Unmanaged.passUnretained(box).toOpaque())
+    }
+
+    /// A manually configured host key as PuTTY stores it: the SHA256 or
+    /// MD5 fingerprint, or public key blob, found in `text` (for example
+    /// a pasted known_hosts line), canonicalised; nil if there is none.
+    public static func canonicalManualHostKey(_ text: String) -> String? {
+        guard let key = spb_canonical_manual_host_key(text) else { return nil }
+        defer { spb_string_free(key) }
+        return String(cString: key)
+    }
+
     /// The default location of PuTTY state for SwiftPutty:
     /// `~/Library/Application Support/SwiftPutty/PuTTY`.
     public static func defaultStateDirectory() throws -> URL {
@@ -116,4 +148,16 @@ public enum PuTTYCore {
     public static var liveSettingsObjectCount: Int {
         Int(spb_debug_live_settings())
     }
+}
+
+/// A frontend saved-session lookup handed to the core.
+private final class SavedSessionLookup: Sendable {
+    let lookup: @Sendable (String) -> PuTTYSettings?
+
+    init(_ lookup: @escaping @Sendable (String) -> PuTTYSettings?) {
+        self.lookup = lookup
+    }
+
+    /// Every lookup ever set, kept alive for the core.
+    static let all = OSAllocatedUnfairLock<[SavedSessionLookup]>(initialState: [])
 }

@@ -66,6 +66,10 @@ typedef struct events {
     int resize_cols, resize_rows;
     spb_settings *exported;
     int reconfigured;
+    struct { char text[64]; uint32_t fg, bg, flags; } runs[8];
+    int n_runs;
+    int styled_writes;
+    int styled_which;
 } events;
 
 static events ev = {
@@ -101,6 +105,21 @@ static void cb_clip(void *ctx, spb_clipboard which, const char *text,
         ev.clip_which = which; ev.clip_writes++);
     free(copy);
 }
+static void cb_styled(void *ctx, spb_clipboard which,
+                      const spb_style_run *runs, size_t n_runs)
+{
+    WITH_EVENTS(
+        ev.n_runs = 0;
+        for (size_t i = 0; i < n_runs && i < 8; i++) {
+            snprintf(ev.runs[i].text, sizeof(ev.runs[i].text), "%.*s",
+                     (int)runs[i].text_len, runs[i].text);
+            ev.runs[i].fg = runs[i].fg;
+            ev.runs[i].bg = runs[i].bg;
+            ev.runs[i].flags = runs[i].flags;
+            ev.n_runs++;
+        }
+        ev.styled_which = which; ev.styled_writes++);
+}
 static void cb_paste(void *ctx, spb_clipboard which)
 {
     WITH_EVENTS(ev.paste_requests++; ev.paste_which = which);
@@ -126,6 +145,7 @@ static const spb_session_callbacks callbacks = {
     .title_changed = cb_title,
     .bell = cb_bell,
     .clipboard_write = cb_clip,
+    .clipboard_write_styled = cb_styled,
     .paste_requested = cb_paste,
     .resize_requested = cb_resize,
     .released = cb_released,
@@ -328,7 +348,8 @@ static void sync_terminal(void)
 static void open_session(const char *const *extra)
 {
     WITH_EVENTS(ev.connected = false; ev.released = false;
-                ev.clip_writes = 0; ev.paste_requests = 0; ev.bells = 0);
+                ev.clip_writes = 0; ev.paste_requests = 0; ev.bells = 0;
+                ev.styled_writes = 0);
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = { .sin_family = AF_INET,
                                 .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
@@ -656,6 +677,7 @@ static void test_selection_and_clipboard(void)
     pthread_mutex_lock(&ev.lock);
     CHECK(ev.clip_which == SPB_CLIPBOARD_SYSTEM);
     CHECK(ev.clip_has_marker);           /* scrollback comes first */
+    CHECK(ev.styled_writes == 0);        /* PasteRTF is off by default */
     pthread_mutex_unlock(&ev.lock);
 }
 
@@ -878,6 +900,114 @@ static void test_configured_session(void)
     test_close_and_release();
 }
 
+/* M12: "Use system colours": the frontend's colours replace the default
+ * and cursor colours while the setting is on, follow changes, and go
+ * when it is turned off. */
+static bool pred_default_bg(const void *arg)
+{
+    return info.default_bg == *(const uint32_t *)arg;
+}
+
+static void test_system_colours(void)
+{
+    const char *const extra[] = { "UseSystemColours", "1", NULL };
+    open_session(extra);
+    spb_session_set_system_colours(session, 0x112233, 0xEEDDCC, 0x000000, 0x3366FF);
+    uint32_t fg = 0x112233, bg = 0xEEDDCC;
+    CHECK(wait_frame(pred_default_fg, &fg, 10));
+    CHECK(wait_frame(pred_default_bg, &bg, 10));
+    read_frame();
+    CHECK(info.cursor_colour == 0x3366FF);
+
+    /* Dark mode, say. */
+    spb_session_set_system_colours(session, 0xDDDDDD, 0x1E1E1E, 0x000000, 0x0A84FF);
+    fg = 0xDDDDDD;
+    CHECK(wait_frame(pred_default_fg, &fg, 10));
+
+    /* Off: PuTTY's configured defaults (Colour0 187,187,187; Colour2 0,0,0). */
+    spb_settings *s = export_running();
+    spb_settings_set(s, "UseSystemColours", "0");
+    apply(s);
+    spb_settings_free(s);
+    fg = 0xBBBBBB;
+    bg = 0x000000;
+    CHECK(wait_frame(pred_default_fg, &fg, 10));
+    CHECK(wait_frame(pred_default_bg, &bg, 10));
+    test_close_and_release();
+}
+
+/* M12: remote-controlled printing (unix/printing.c): the printer is a
+ * command; ESC[5i ... ESC[4i is piped to it, and is not displayed. */
+static char print_dir[512];
+
+static void test_printing(void)
+{
+    char out[600], printer[700];
+    snprintf(out, sizeof(out), "%s/printed.txt", print_dir);
+    snprintf(printer, sizeof(printer), "cat > '%s'", out);
+    const char *const extra[] = { "Printer", printer, NULL };
+    open_session(extra);
+    peer_write("\033[2J\033[1;1Hbefore\033[5iprinted text\r\n\033[4iafter");
+    CHECK(wait_row(0, "beforeafter"));
+    char buf[256] = "";
+    double deadline = now_seconds() + 10;
+    while (now_seconds() < deadline) {
+        FILE *f = fopen(out, "r");
+        size_t n = f ? fread(buf, 1, sizeof(buf) - 1, f) : 0;
+        if (f)
+            fclose(f);
+        buf[n] = '\0';
+        if (strstr(buf, "printed text\r\n"))
+            break;
+        usleep(10000);
+    }
+    CHECK(!strcmp(buf, "printed text\r\n"));
+    unlink(out);
+    test_close_and_release();
+}
+
+/* M12: Copy as RTF (PasteRTF): the selection arrives as runs of equal
+ * style, decided as windows/window.c win_clip_write decides them. */
+static bool styled_written(void) { return ev.styled_writes > 0; }
+
+static void test_copy_as_rtf(void)
+{
+    /* Bold as both font and colour, so bold shows in the flags too. */
+    const char *const extra[] = { "PasteRTF", "1", "BoldAsColour", "2", NULL };
+    open_session(extra);
+    peer_write("\033[2J\033[1;1Hplain \033[1;31mbold\033[0m "
+               "\033[4;42mund\033[0m");
+    CHECK(wait_row(0, "plain bold und"));
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_CLICK, 0, 0, 0);
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_DRAG, 13, 0, 0);
+    spb_session_mouse(session, SPB_MOUSE_LEFT, SPB_MOUSE_RELEASE, 13, 0, 0);
+    CHECK(wait_events(styled_written, 10));
+    pthread_mutex_lock(&ev.lock);
+    CHECK(ev.styled_which == SPB_CLIPBOARD_SELECTION);
+    CHECK(ev.clip_writes == 0);          /* instead of the plain write */
+    CHECK(ev.n_runs == 4);
+    if (ev.n_runs == 4) {
+        CHECK_STR(ev.runs[0].text, "plain ");
+        CHECK(ev.runs[0].fg == SPB_COLOUR_DEFAULT);
+        CHECK(ev.runs[0].bg == SPB_COLOUR_DEFAULT);
+        CHECK(ev.runs[0].flags == 0);
+        /* Bold red is bumped to bright red (Colour9 255,85,85). */
+        CHECK_STR(ev.runs[1].text, "bold");
+        CHECK(ev.runs[1].fg == 0xFF5555);
+        CHECK(ev.runs[1].bg == SPB_COLOUR_DEFAULT);
+        CHECK(ev.runs[1].flags == SPB_RUN_BOLD);
+        CHECK_STR(ev.runs[2].text, " ");
+        CHECK(ev.runs[2].flags == 0);
+        /* Green background (Colour10 0,187,0), default foreground. */
+        CHECK_STR(ev.runs[3].text, "und");
+        CHECK(ev.runs[3].fg == SPB_COLOUR_DEFAULT);
+        CHECK(ev.runs[3].bg == 0x00BB00);
+        CHECK(ev.runs[3].flags == SPB_RUN_UNDERLINE);
+    }
+    pthread_mutex_unlock(&ev.lock);
+    test_close_and_release();
+}
+
 static void test_close_and_release(void)
 {
     close(peer);                                       /* remote end goes */
@@ -915,6 +1045,10 @@ int main(void)
     test_mouse_reporting();
     test_output_is_coalesced();
     test_close_and_release();
+    snprintf(print_dir, sizeof(print_dir), "%s", base);
+    test_printing();
+    test_system_colours();
+    test_copy_as_rtf();
     test_configured_session();
 
     CHECK(spb_core_shutdown());

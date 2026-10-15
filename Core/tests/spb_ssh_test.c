@@ -1148,6 +1148,352 @@ static void test_port_forwarding(fixture *f)
 
 /* ---------- Public-key authentication (M09) ---------- */
 
+/* M12: "SSH to proxy and use port forwarding": a Raw session to a local
+ * echo server, through uppity as the jump host (its host key is already
+ * stored). The jump session's settings come from the frontend's saved
+ * sessions (API v10): "Default Settings" when the proxy host is a host
+ * name, or the saved session it names. */
+static int jump_port;
+static int lookups;
+
+static spb_settings *saved_session(void *ctx, const char *name)
+{
+    lookups++;                         /* core thread only */
+    bool is_default = !strcmp(name, "Default Settings");
+    if (!is_default && strcmp(name, "jump-session"))
+        return NULL;
+    spb_settings *s = spb_settings_new_defaults();
+    /* Password authentication only: no agent, GSSAPI or k-i. */
+    spb_settings_set(s, "AuthKI", "0");
+    spb_settings_set(s, "TryAgent", "0");
+    spb_settings_set(s, "AuthGSSAPI", "0");
+    spb_settings_set(s, "AuthGSSAPIKEX", "0");
+    if (!is_default) {
+        char port[16];
+        snprintf(port, sizeof(port), "%d", jump_port);
+        spb_settings_set(s, "HostName", "127.0.0.1");
+        spb_settings_set(s, "PortNumber", port);
+        spb_settings_set(s, "UserName", "tester");
+    }
+    return s;
+}
+static bool echoed_twice(void)
+{
+    const char *t = screen_text(), *first = strstr(t, "jump-hop");
+    return first && strstr(first + 1, "jump-hop");
+}
+
+static void jump_once(const char *const *settings, bool password_prompt)
+{
+    echo_server echo;
+    echo_start(&echo);
+    open_session_with(echo.port, NULL, false, settings);
+    if (password_prompt) {
+        /* No stored password: asked in the terminal, for the proxy. */
+        CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+        type("weasel\r");
+    }
+    CHECK(wait_rec(is_connected, 20));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.prompts == 0);
+    pthread_mutex_unlock(&rec.lock);
+    CHECK(strstr(rec.event_log, "proxy: Using username \"tester\"") != NULL);
+    /* Raw edits and echoes the line locally (Return sends it); the echo
+     * server echoes it again. */
+    type("jump-hop");
+    spb_session_key(session, SPB_KEY_RETURN, 0);
+    double deadline = now_seconds() + 20;
+    while (!echoed_twice() && now_seconds() < deadline)
+        usleep(5000);
+    CHECK(echoed_twice());
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    echo_stop(&echo);
+}
+
+static void test_ssh_jump_proxy(fixture *f)
+{
+    jump_port = f->port;
+    spb_core_set_saved_session_lookup(saved_session, NULL);
+    char proxy_port[16];
+    snprintf(proxy_port, sizeof(proxy_port), "%d", f->port);
+
+    /* A host name: settings from "Default Settings", user name and
+     * password from the proxy settings. */
+    const char *const by_host[] = {
+        "Protocol", "raw", "ProxyMethod", "6", "ProxyHost", "127.0.0.1",
+        "ProxyPort", proxy_port, "ProxyLocalhost", "1",
+        "ProxyUsername", "tester", "ProxyPassword", "weasel", NULL };
+    jump_once(by_host, false);
+
+    /* A saved session's name: its host, port and user name; no stored
+     * password, so PuTTY asks for it. */
+    const char *const by_session[] = {
+        "Protocol", "raw", "ProxyMethod", "6", "ProxyHost", "jump-session",
+        "ProxyLocalhost", "1", NULL };
+    jump_once(by_session, true);
+
+    CHECK(spb_core_barrier());
+    CHECK(lookups >= 2);
+    spb_core_set_saved_session_lookup(NULL, NULL);
+}
+
+/* M12: Connection/Data's environment variables reach the server (SSH
+ * "env" requests); a comma in a value is escaped in the saved form. */
+static void test_environment(fixture *f)
+{
+    const char *const env[] = {
+        "Environment", "SPB_ONE=first value,SPB_TWO=a\\,b", NULL };
+    open_session_with(f->port, "tester", false, env);
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    type("weasel\r");
+    CHECK(wait_rec(is_connected, 20));
+    type("echo \"<$SPB_ONE> <$SPB_TWO>\"\r");
+    CHECK(wait_screen("\n<first value> <a,b>\n", 20));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+}
+
+/* M12: connection sharing. A second session to the same server reuses
+ * the first one's connection: no login, a sharing downstream (backend
+ * cfg info -1), and the upstream's close warning names it. Sessions are
+ * swapped with a second set of globals by hand: the record and terminal
+ * helpers follow `session`. */
+static bool is_exported_info(void) { return rec.exported != NULL; }
+
+static void test_connection_sharing(fixture *f)
+{
+    const char *const share[] = { "ConnectionSharing", "1", NULL };
+    open_session_with(f->port, "tester", false, share);
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    type("weasel\r");
+    CHECK(wait_rec(is_connected, 20));
+    CHECK(strstr(rec.event_log, "Could not set up connection sharing") == NULL);
+    spb_session *upstream = session;
+
+    /* The downstream: the record is reset, but the upstream keeps
+     * running (its callbacks keep landing in the same record). */
+    open_session_with(f->port, "tester", false, share);
+    spb_session *downstream = session;
+    CHECK(wait_screen("Reusing a shared connection to this server.", 20));
+    CHECK(wait_rec(is_connected, 20));
+    type("echo shared-$((3*3))\r");
+    CHECK(wait_screen("\nshared-9\n", 20));
+    spb_session_export_settings(downstream, 1);
+    CHECK(wait_rec(is_exported_info, 10));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.protocol_info == -1);
+    spb_settings_free(rec.exported);
+    rec.exported = NULL;
+    pthread_mutex_unlock(&rec.lock);
+
+    /* The upstream warns that closing it closes the downstream too. */
+    session = upstream;
+    query_close_warning();
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.close_connected);
+    CHECK(!strcmp(rec.close_text, "This will also close 1 downstream connection."));
+    pthread_mutex_unlock(&rec.lock);
+
+    session = downstream;
+    spb_session_close(downstream);
+    spb_session_release(downstream);
+    session = upstream;
+    spb_session_close(upstream);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    CHECK(spb_core_barrier());
+}
+
+/* M12: manually configured host keys. A fresh server (its key not
+ * cached): a listed fingerprint is accepted with no dialog and nothing
+ * stored; an unlisted key fails. Also the canonical form "Add key"
+ * stores. */
+static void test_manual_host_keys(void)
+{
+    static const char fp[] = "SHA256:ADly5k1O7s2C72nWl2ReSxP+HnNPcmTIGAcWJE/gMmg";
+    char *canon = spb_canonical_manual_host_key(
+        "127.0.0.1 ssh-ed25519 255 SHA256:ADly5k1O7s2C72nWl2ReSxP+HnNPcmTIGAcWJE/gMmg");
+    CHECK(canon && !strcmp(canon, fp));
+    spb_string_free(canon);
+    canon = spb_canonical_manual_host_key(
+        "MD5:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99");
+    CHECK(canon && !strcmp(canon, "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"));
+    spb_string_free(canon);
+    CHECK(spb_canonical_manual_host_key("not a key") == NULL);
+
+    fixture fresh = fixture_start("hostkey-a.ppk", 0);
+    const char *const listed[] = { "SSHManualHostKeys", fp, NULL };
+    open_session_with(fresh.port, "tester", false, listed);
+    CHECK(wait_screen("tester@127.0.0.1's password:", 20));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.prompts == 0);                       /* no host key dialog */
+    pthread_mutex_unlock(&rec.lock);
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+
+    const char *const other[] = {
+        "SSHManualHostKeys", "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", NULL };
+    open_session_with(fresh.port, "tester", false, other);
+    CHECK(wait_rec(is_final, 20));
+    pthread_mutex_lock(&rec.lock);
+    CHECK(rec.state == SPB_SESSION_FAILED);
+    CHECK(strstr(rec.detail, "Host key not in manually configured list") != NULL);
+    CHECK(rec.prompts == 0);
+    pthread_mutex_unlock(&rec.lock);
+    release_session();
+
+    /* Nothing was stored: without the list, PuTTY asks. */
+    open_session(fresh.port, "tester", false);
+    CHECK(wait_rec(has_prompt, 20));
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    fixture_stop(&fresh);
+}
+
+/* M12: the trusted host CA store, with upstream's dialog rules. */
+static void test_host_cas(void)
+{
+    char path[700], text[2048];
+    snprintf(path, sizeof(path), "%s/userkey.pub", SPB_FIXTURES_DIR);
+    FILE *fp = fopen(path, "r");
+    size_t n = fp ? fread(text, 1, sizeof(text) - 1, fp) : 0;
+    text[n] = '\0';
+    if (fp)
+        fclose(fp);
+
+    size_t count;
+    char **names = spb_host_ca_names(&count);
+    CHECK(count == 0);
+    spb_strings_free(names, count);
+
+    /* The key: a public key file's text, shown by its fingerprint. */
+    char *blob = NULL, *info = spb_host_ca_key_info(text, &blob);
+    CHECK(info && !strncmp(info, "ssh-ed25519 255 SHA256:", 23));
+    CHECK(blob && !strncmp(blob, "AAAAC3NzaC1lZDI1NTE5", 20));
+    spb_string_free(info);
+    info = spb_host_ca_key_info("not a key!", NULL);
+    CHECK(info && !strncmp(info, "Cannot decode key", 17));
+    spb_string_free(info);
+
+    spb_host_ca *ca = spb_host_ca_new_default();
+    CHECK(ca && !ca->permit_rsa_sha1 && ca->permit_rsa_sha256 && ca->permit_rsa_sha512);
+    free(ca->name);
+    ca->name = strdup("Test CA");
+    free(ca->public_key);
+    ca->public_key = strdup(text);
+
+    /* Upstream's checks, in its order. */
+    size_t off, len;
+    char *err = spb_host_ca_save(ca, &off, &len);
+    CHECK(err && !strcmp(err, "No validity expression configured for this key"));
+    spb_string_free(err);
+    free(ca->validity);
+    ca->validity = strdup("*.example.org &&");
+    err = spb_host_ca_save(ca, &off, &len);
+    CHECK(err && !strncmp(err, "Error in expression: ", 21));
+    CHECK(off != SIZE_MAX && off <= strlen(ca->validity));
+    spb_string_free(err);
+    free(ca->validity);
+    ca->validity = strdup("*.example.org || port:2222");
+    free(ca->public_key);
+    ca->public_key = strdup("garbage");
+    err = spb_host_ca_save(ca, NULL, NULL);
+    CHECK(err && !strcmp(err, "No valid CA public key entered"));
+    spb_string_free(err);
+    free(ca->public_key);
+    ca->public_key = strdup(text);
+    ca->permit_rsa_sha1 = true;
+    CHECK(spb_host_ca_save(ca, NULL, NULL) == NULL);
+    spb_host_ca_free(ca);
+
+    names = spb_host_ca_names(&count);
+    CHECK(count == 1 && !strcmp(names[0], "Test CA"));
+    spb_strings_free(names, count);
+    ca = spb_host_ca_load("Test CA");
+    CHECK(ca && !strcmp(ca->public_key, blob));       /* stored as a blob */
+    CHECK(ca && !strcmp(ca->validity, "*.example.org || port:2222"));
+    CHECK(ca && ca->permit_rsa_sha1);
+    spb_host_ca_free(ca);
+    CHECK(spb_host_ca_load("No such CA") == NULL);
+
+    CHECK(spb_host_ca_delete("Test CA") == NULL);
+    names = spb_host_ca_names(&count);
+    CHECK(count == 0);
+    spb_strings_free(names, count);
+    spb_string_free(blob);
+}
+
+/* M12: authentication through an SSH agent (the system ssh-agent at
+ * SSH_AUTH_SOCK, as PuTTY's Unix code uses it), and agent forwarding:
+ * the remote shell lists the agent's key through the forwarded agent. */
+static void test_agent(void)
+{
+    char dir[600], sock[700], key[700], cmd[2048], pub[700], src[700];
+    snprintf(dir, sizeof(dir), "%s/agent", workdir);
+    snprintf(sock, sizeof(sock), "%s/s", dir);
+    snprintf(key, sizeof(key), "%s/userkey", dir);
+    snprintf(src, sizeof(src), "%s/userkey.openssh", SPB_FIXTURES_DIR);
+    snprintf(pub, sizeof(pub), "%s/userkey.pub", SPB_FIXTURES_DIR);
+    /* ssh-add refuses a key others can read; git does not keep modes. */
+    snprintf(cmd, sizeof(cmd), "mkdir -p '%s' && cp '%s' '%s' && chmod 600 '%s'",
+             dir, src, key, key);
+    CHECK(system(cmd) == 0);
+
+    snprintf(cmd, sizeof(cmd), "ssh-agent -a '%s'", sock);
+    FILE *out = popen(cmd, "r");
+    int agent_pid = 0;
+    char line[512];
+    while (out && fgets(line, sizeof(line), out))
+        if (strstr(line, "SSH_AGENT_PID="))
+            agent_pid = atoi(strstr(line, "SSH_AGENT_PID=") + 14);
+    if (out)
+        pclose(out);
+    CHECK(agent_pid > 0);
+    snprintf(cmd, sizeof(cmd), "SSH_AUTH_SOCK='%s' ssh-add -q '%s' 2>/dev/null",
+             sock, key);
+    CHECK(system(cmd) == 0);
+    char *old_sock = getenv("SSH_AUTH_SOCK") ? strdup(getenv("SSH_AUTH_SOCK")) : NULL;
+    setenv("SSH_AUTH_SOCK", sock, 1);
+
+    /* A server that only accepts the key. */
+    const char *const opts[] = {
+        "--userkey", pub, "--deny-auth", "password",
+        "--deny-auth", "keyboard-interactive", NULL };
+    fixture keyed = fixture_start_with("hostkey-a.ppk", 0, opts);
+    const char *const use_agent[] = { "TryAgent", "1", "AgentFwd", "1", NULL };
+    open_session_with(keyed.port, "tester", false, use_agent);
+    CHECK(wait_rec(has_prompt, 20));           /* a new port: host key */
+    answer(SPB_ANSWER_ACCEPT_ONCE);
+    CHECK(wait_rec(is_connected, 20));
+    CHECK(strstr(rec.event_log, "Pageant has 1 SSH-2 keys") != NULL);
+    CHECK(wait_screen("Authenticating with public key \"SwiftPutty test user key", 20));
+    CHECK(wait_screen("\" from agent", 20));
+
+    /* Forwarded: the remote side sees the same key. */
+    type("ssh-add -l\r");
+    CHECK(wait_screen("256 SHA256:KPyQwdntNVnuUdA0ck24gH8/uII7Oamqccky7fdsN0c", 20));
+    CHECK(wait_screen("not secret (ED25519)", 20));
+    CHECK(strstr(rec.event_log, "Agent forwarding enabled") != NULL);
+    spb_session_close(session);
+    CHECK(wait_rec(is_final, 10));
+    release_session();
+    fixture_stop(&keyed);
+
+    if (old_sock) {
+        setenv("SSH_AUTH_SOCK", old_sock, 1);
+        free(old_sock);
+    } else {
+        unsetenv("SSH_AUTH_SOCK");
+    }
+    if (agent_pid > 0)
+        kill(agent_pid, SIGTERM);
+}
+
 static void test_public_key_auth(void)
 {
     char pub[700], key[700], secret_key[700];
@@ -1182,10 +1528,12 @@ static void test_public_key_auth(void)
                                         "SshBanner", "0", NULL };
     open_session_with(keyed.port, "tester", false, with_secret);
     CHECK(wait_screen("Passphrase for key \"SwiftPutty test user key (passphrase 'secret')", 20));
+    /* Each try runs Argon2 over several MiB, which ThreadSanitizer slows
+     * enough that 20 seconds was not always enough on a loaded host. */
     type("wrong\r");
-    CHECK(wait_screen("Wrong passphrase", 20));
+    CHECK(wait_screen("Wrong passphrase", 90));
     type("secret\r");
-    CHECK(wait_rec(is_connected, 20));
+    CHECK(wait_rec(is_connected, 90));
     CHECK(strstr(screen_text(), "Welcome to the key-only") == NULL); /* banner off */
     CHECK(strstr(screen_text(), "secret") == NULL || strstr(screen_text(), "'secret'"));
     spb_session_close(session);
@@ -1230,6 +1578,12 @@ int main(void)
     test_live_reconfigure(&server);
     test_port_forwarding(&server);
     test_session_operations(&server);
+    test_ssh_jump_proxy(&server);
+    test_environment(&server);
+    test_connection_sharing(&server);
+    test_manual_host_keys();
+    test_host_cas();
+    test_agent();
     test_restart_after_failure();
     test_accept_once_and_cancel();
     test_changed_host_key(&server);

@@ -1,0 +1,25 @@
+SwiftPutty local patch 0013
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; should be (undefined behaviour)
+
+Proxy: initialise the negotiator's reconnect flag.
+
+proxy.h says ProxyNegotiator's standard fields are set up centrally, and
+new_connection() sets done, error and aborted, but not reconnect, which
+the HTTP negotiator added. The negotiators allocate with snew(), so
+proxy_negotiate() read an indeterminate bool, and a nonzero byte there
+made any proxy type drop its connection to the proxy and reconnect.
+Found by UndefinedBehaviorSanitizer ("load of value 190, which is not a
+valid value for type 'bool'") on Core/tests/spb_backends_test.c.
+Applies after patch 0011.
+
+--- a/proxy/proxy.c
++++ b/proxy/proxy.c
+@@ -587,6 +587,7 @@
+         ps->pn->done = false;
+         ps->pn->error = NULL;
+         ps->pn->aborted = false;
++        ps->pn->reconnect = false;
+         ps->pn->input = &ps->pending_input_data;
+         /* Provide an Interactor to the negotiator if and only if we
+          * are usefully able to ask interactive questions of the user */

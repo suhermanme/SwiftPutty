@@ -235,7 +235,45 @@ struct TerminalPanel: View {
                 RadioSetting(model: model, label: "Local line editing:", keyword: .localEdit,
                              options: [("Auto", "2"), ("Force on", "0"), ("Force off", "1")])
             }
+            SettingsGroup(title: "Remote-controlled printing") {
+                Text("Printer to send ANSI printer output to:")
+                PrinterField(text: Binding(get: { model.string(.printer) },
+                                           set: { model.setString(.printer, $0) }))
+            }
         }
+    }
+}
+
+/// As unix/printing.c: the printer is a command that print jobs are piped
+/// to (empty: printing disabled). The menu offers PuTTY's "None" and an
+/// `lpr` command for each printer macOS knows.
+struct PrinterField: View {
+    @Binding var text: String
+    static let disabled = "None (printing disabled)"
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField(Self.disabled, text: $text)
+                .labelsHidden()
+                .accessibilityLabel("Printer to send ANSI printer output to")
+            Menu {
+                Button(Self.disabled) { text = "" }
+                Divider()
+                ForEach(NSPrinter.printerNames, id: \.self) { name in
+                    Button(name) { text = Self.lprCommand(for: name) }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Printers")
+        }
+    }
+
+    /// The command that prints to a macOS (CUPS) printer.
+    static func lprCommand(for printer: String) -> String {
+        "lpr -P '" + printer.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 
@@ -251,11 +289,21 @@ struct WindowPanel: View {
                     NumberSetting(model: model, label: "Columns", keyword: .termWidth)
                     NumberSetting(model: model, label: "Rows", keyword: .termHeight)
                 }
+                // Windows PuTTY's option; "maximised" is zoomed or full
+                // screen.
+                RadioSetting(model: model, label: "When window is resized:", keyword: .lockSize,
+                             options: [("Change the number of rows and columns", "0"),
+                                       ("Change the size of the font", "2"),
+                                       ("Change font size only when maximised", "3"),
+                                       ("Forbid resizing completely", "1")],
+                             horizontal: false)
             }
             SettingsGroup(title: "Control the scrollback in the window") {
                 NumberSetting(model: model, label: "Lines of scrollback", keyword: .scrollbackLines)
                 CheckboxSetting(model: model, label: "Display scrollbar", keyword: .scrollBar)
                 CheckboxSetting(model: model, label: "Scrollbar on left", keyword: .scrollbarOnLeft)
+                CheckboxSetting(model: model, label: "Display scrollbar in full screen mode",
+                                keyword: .scrollBarFullScreen)
                 CheckboxSetting(model: model, label: "Reset scrollback on keypress", keyword: .scrollOnKey)
                 CheckboxSetting(model: model, label: "Reset scrollback on display activity",
                                 keyword: .scrollOnDisp)
@@ -303,6 +351,68 @@ struct AppearancePanel: View {
     }
 }
 
+// MARK: - Window/Fonts (GTK PuTTY, unix/config-gtk.c)
+
+struct FontsPanel: View {
+    let model: ConfigurationModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsGroup(title: "Fonts for displaying non-bold text") {
+                FontRow(model: model, label: "Font used for ordinary text", keyword: .fontName,
+                        optional: false)
+                FontRow(model: model, label: "Font used for wide (CJK) text", keyword: .wideFontName,
+                        optional: true)
+            }
+            SettingsGroup(title: "Fonts for displaying bolded text") {
+                FontRow(model: model, label: "Font used for bolded text", keyword: .boldFontName,
+                        optional: true)
+                FontRow(model: model, label: "Font used for bold wide text", keyword: .wideBoldFontName,
+                        optional: true)
+                CheckboxSetting(model: model, label: "Use shadow bold instead of bold fonts",
+                                keyword: .shadowBold)
+                Text("(Note that bold fonts or shadow bolding are only used if you have not requested bolding to be done by changing the text colour.)")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                NumberSetting(model: model, label: "Horizontal offset for shadow bold:",
+                              keyword: .shadowBoldOffset)
+            }
+        }
+    }
+}
+
+/// A font setting: its description, Change…, and (for fonts that are
+/// derived when not set) Clear.
+private struct FontRow: View {
+    let model: ConfigurationModel
+    let label: String
+    let keyword: PuTTYKeyword
+    let optional: Bool
+    @State private var choosing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+            HStack {
+                let name = model.string(keyword)
+                Text(optional && name.isEmpty ? "Not set (derived from the ordinary font)"
+                                              : FontSetting.describe(name))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Change…") { choosing = true }
+                    .popover(isPresented: $choosing, arrowEdge: .trailing) {
+                        FontChooser(fontName: Binding(
+                            get: { name.isEmpty ? model.string(.fontName) : name },
+                            set: { model.setString(keyword, $0) }))
+                    }
+                if optional {
+                    Button("Clear") { model.setString(keyword, "") }
+                        .disabled(name.isEmpty)
+                }
+            }
+        }
+    }
+}
+
 /// PuTTY's `FontName` as SwiftPutty writes it: "<PostScript name>
 /// <points>" (D-016).
 enum FontSetting {
@@ -317,27 +427,41 @@ enum FontSetting {
 
     /// Fixed-pitch fonts, by display name.
     @MainActor
-    static let fixedPitchFonts: [(name: String, postScriptName: String)] = {
-        let names = NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? []
-        return names.compactMap { name in
+    static let fixedPitchFonts = entries(NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? [])
+
+    /// Every font, by display name.
+    @MainActor
+    static let allFonts = entries(NSFontManager.shared.availableFonts)
+
+    private static func entries(_ names: [String]) -> [(name: String, postScriptName: String)] {
+        names.compactMap { name in
             NSFont(name: name, size: 12).map { (name: $0.displayName ?? name, postScriptName: name) }
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }()
+    }
 }
 
 struct FontChooser: View {
     @Binding var fontName: String
+    /// Windows PuTTY's "Allow selection of variable-pitch fonts" (GTK's
+    /// font selector has the same switch); not saved, as there.
+    @State private var variablePitch = false
 
     var body: some View {
         let font = TerminalFont(puttyFontName: fontName).font
+        let fonts = variablePitch ? FontSetting.allFonts : FontSetting.fixedPitchFonts
         Form {
             Picker("Font", selection: Binding(get: { font.fontName },
                                               set: { fontName = "\($0) \(FontSetting.formatSize(font.pointSize))" })) {
-                ForEach(FontSetting.fixedPitchFonts, id: \.postScriptName) { entry in
+                ForEach(fonts, id: \.postScriptName) { entry in
                     Text(entry.name).tag(entry.postScriptName)
                 }
+                // The current font, even if the list does not have it.
+                if !fonts.contains(where: { $0.postScriptName == font.fontName }) {
+                    Text(font.displayName ?? font.fontName).tag(font.fontName)
+                }
             }
+            Toggle("Allow selection of variable-pitch fonts", isOn: $variablePitch)
             Stepper(value: Binding(get: { Double(font.pointSize) },
                                    set: { fontName = "\(font.fontName) \(FontSetting.formatSize(CGFloat($0)))" }),
                     in: 4...72, step: 1) {
@@ -426,6 +550,49 @@ struct DataPanel: View {
             SettingsGroup(title: "Terminal details") {
                 TextSetting(model: model, label: "Terminal-type string", keyword: .terminalType)
                 TextSetting(model: model, label: "Terminal speeds", keyword: .terminalSpeed)
+            }
+            EnvironmentSettings(model: model)
+        }
+    }
+}
+
+/// config.c's "Environment variables" box: Variable / Value, Add, the
+/// list and Remove.
+private struct EnvironmentSettings: View {
+    @Bindable var model: ConfigurationModel
+    @State private var selection: Int?
+
+    var body: some View {
+        SettingsGroup(title: "Environment variables") {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Variable")
+                    PlainTextField(label: "Variable", text: $model.environmentName)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Value")
+                    PlainTextField(label: "Value", text: $model.environmentValue)
+                }
+                Button("Add") { model.addEnvironmentVariable() }
+                    .buttonStyle(.bordered)
+            }
+            HStack(alignment: .top) {
+                List(selection: $selection) {
+                    ForEach(Array(model.environmentVariables.enumerated()), id: \.offset) { index, variable in
+                        HStack {
+                            Text(variable.name).frame(width: 140, alignment: .leading)
+                            Text(variable.value)
+                        }
+                        .tag(index)
+                    }
+                }
+                .listStyle(.bordered(alternatesRowBackgrounds: false))
+                .frame(height: 3 * 24)
+                Button("Remove") {
+                    model.removeEnvironmentVariable(at: selection)
+                    selection = nil
+                }
+                .buttonStyle(.bordered)
             }
         }
     }

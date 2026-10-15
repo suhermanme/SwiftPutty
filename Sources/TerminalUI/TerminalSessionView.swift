@@ -4,16 +4,23 @@ import SwiftUI
 /// SwiftUI host for a ``TerminalView``.
 public struct TerminalSessionView: NSViewRepresentable {
     public let controller: SessionController
+    /// The window's menu for a right-click that asks for it.
+    public var contextMenu: (() -> NSMenu?)?
 
-    public init(controller: SessionController) {
+    public init(controller: SessionController, contextMenu: (() -> NSMenu?)? = nil) {
         self.controller = controller
+        self.contextMenu = contextMenu
     }
 
     public func makeNSView(context: Context) -> TerminalView {
-        TerminalView(controller: controller)
+        let view = TerminalView(controller: controller)
+        view.contextMenu = contextMenu
+        return view
     }
 
-    public func updateNSView(_ view: TerminalView, context: Context) {}
+    public func updateNSView(_ view: TerminalView, context: Context) {
+        view.contextMenu = contextMenu
+    }
 
     public func sizeThatFits(_ proposal: ProposedViewSize, nsView view: TerminalView,
                              context: Context) -> CGSize? {

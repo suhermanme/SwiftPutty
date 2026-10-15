@@ -409,6 +409,55 @@ static spb_clipboard clipboard_of(int clipboard, bool *ok)
     }
 }
 
+/* Style of one copied character, decided the way PuTTY's Windows RTF
+ * writer decides it (win_clip_write in windows/window.c): colour indices
+ * from the attributes, swapped for reverse video and bumped for
+ * bold/blink when the terminal uses bold colours, then the terminal's
+ * default colours reported as SPB_COLOUR_DEFAULT so the receiving
+ * application can follow its own appearance. The RGB values come from
+ * resolve_colours, so a styled copy matches what the screen shows. */
+static void copy_style_of(struct spb_screen *sc, unsigned long attr,
+                          truecolour tc, uint32_t *fg_out, uint32_t *bg_out,
+                          uint32_t *flags_out)
+{
+    int nfg = (attr & ATTR_FGMASK) >> ATTR_FGSHIFT;
+    int nbg = (attr & ATTR_BGMASK) >> ATTR_BGSHIFT;
+    bool rev = attr & ATTR_REVERSE;
+    if (rev) { int t = nfg; nfg = nbg; nbg = t; }
+    if ((sc->bold_style & BOLD_STYLE_COLOUR) && (attr & ATTR_BOLD)) {
+        if (nfg < 16) nfg |= 8;
+        else if (nfg >= 256) nfg |= 1;
+    }
+    if ((sc->bold_style & BOLD_STYLE_COLOUR) && (attr & ATTR_BLINK)) {
+        if (nbg < 16) nbg |= 8;
+        else if (nbg >= 256) nbg |= 1;
+    }
+
+    /* Reverse video always carries explicit colours, so only the
+     * non-reversed case can fall back to the terminal defaults. */
+    bool fg_default = false, bg_default = false;
+    if (!rev) {
+        if (!tc.bg.enabled && nbg >= 256)
+            bg_default = true;
+        if (!tc.fg.enabled && nfg >= 256)
+            fg_default = true;
+    }
+
+    bool bold = (attr & ATTR_BOLD) && (sc->bold_style & BOLD_STYLE_FONT);
+    /* Bold text in the default foreground is emphasised even when bold is
+     * a font change rather than a colour bump, as Windows does. */
+    if (fg_default && bg_default &&
+        (sc->bold_style & BOLD_STYLE_COLOUR) && (nfg & 1))
+        bold = true;
+
+    resolve_colours(sc, attr, tc, fg_out, bg_out);
+    if (fg_default) *fg_out = SPB_COLOUR_DEFAULT;
+    if (bg_default) *bg_out = SPB_COLOUR_DEFAULT;
+
+    *flags_out = (bold ? SPB_RUN_BOLD : 0) |
+                 ((attr & ATTR_UNDER) ? SPB_RUN_UNDERLINE : 0);
+}
+
 static void spb_tw_clip_write(TermWin *tw, int clipboard, wchar_t *text,
                               int *attrs, truecolour *colours, int len,
                               bool must_deselect)
@@ -416,12 +465,57 @@ static void spb_tw_clip_write(TermWin *tw, int clipboard, wchar_t *text,
     spb_session *s = termwin_session(tw);
     bool ok;
     spb_clipboard which = clipboard_of(clipboard, &ok);
-    if (!ok || atomic_load(&s->released) || !s->cb.clipboard_write)
+    if (!ok || atomic_load(&s->released))
         return;
-    size_t outlen;
-    char *utf8 = dup_wc_to_mb_c(CP_UTF8, text, len, "", &outlen);
-    s->cb.clipboard_write(s->cb_ctx, which, utf8, outlen);
-    burnstr(utf8);
+
+    if (!attrs || !conf_get_bool(s->conf, CONF_rtf_paste) ||
+        !s->cb.clipboard_write_styled) {
+        if (!s->cb.clipboard_write)
+            return;
+        size_t outlen;
+        char *utf8 = dup_wc_to_mb_c(CP_UTF8, text, len, "", &outlen);
+        s->cb.clipboard_write(s->cb_ctx, which, utf8, outlen);
+        burnstr(utf8);
+        return;
+    }
+
+    /* Copy as RTF (CONF_rtf_paste): coalesce the selection into runs of
+     * equal style, as the Windows build does when it adds its RTF
+     * clipboard format. The frontend writes the plain text too if it
+     * wants it; the bridge hands over the styled runs instead. */
+    strbuf *all = strbuf_new();
+    size_t *offs = snewn(len > 0 ? len : 1, size_t);
+    spb_style_run *runs = snewn(len > 0 ? len : 1, spb_style_run);
+    size_t n_runs = 0;
+    for (int i = 0; i < len; i++) {
+        truecolour tc = { optionalrgb_none, optionalrgb_none };
+        if (colours) tc = colours[i];
+        uint32_t fg, bg, flags;
+        copy_style_of(s->screen, attrs[i], tc, &fg, &bg, &flags);
+
+        size_t clen;
+        char *c = dup_wc_to_mb_c(CP_UTF8, text + i, 1, "", &clen);
+        size_t off = all->len;
+        put_datapl(all, make_ptrlen(c, clen));
+        burnstr(c);
+
+        if (n_runs > 0 && runs[n_runs - 1].fg == fg &&
+            runs[n_runs - 1].bg == bg && runs[n_runs - 1].flags == flags) {
+            runs[n_runs - 1].text_len += clen;
+        } else {
+            offs[n_runs] = off;
+            runs[n_runs] = (spb_style_run){ NULL, clen, fg, bg, flags };
+            n_runs++;
+        }
+    }
+    for (size_t j = 0; j < n_runs; j++)
+        runs[j].text = all->s + offs[j];
+
+    s->cb.clipboard_write_styled(s->cb_ctx, which, runs, n_runs);
+
+    sfree(offs);
+    sfree(runs);
+    strbuf_free(all);
 }
 
 static void spb_tw_clip_request_paste(TermWin *tw, int clipboard)
@@ -500,8 +594,61 @@ static void spb_tw_palette_set(TermWin *tw, unsigned start, unsigned ncolours,
             rgb_value(sc_->palette[OSC4_COLOUR_cursor_bg])));
 }
 
-/* As GTK PuTTY: no OS-level colour overrides. */
-static void spb_tw_palette_get_overrides(TermWin *tw, Terminal *term) {}
+/* windows/window.c wintw_palette_get_overrides: "Use system colours"
+ * replaces the default colours with the system's, here the ones the
+ * frontend last supplied (spb_session_set_system_colours). */
+static void spb_tw_palette_get_overrides(TermWin *tw, Terminal *term)
+{
+    spb_session *s = termwin_session(tw);
+    if (!s->have_system_colours || !conf_get_bool(s->conf, CONF_system_colour))
+        return;
+    term_palette_override(term, OSC4_COLOUR_fg, s->system_fg);
+    term_palette_override(term, OSC4_COLOUR_fg_bold, s->system_fg);
+    term_palette_override(term, OSC4_COLOUR_bg, s->system_bg);
+    term_palette_override(term, OSC4_COLOUR_bg_bold, s->system_bg);
+    term_palette_override(term, OSC4_COLOUR_cursor_fg, s->system_cursor_fg);
+    term_palette_override(term, OSC4_COLOUR_cursor_bg, s->system_cursor_bg);
+}
+
+typedef struct system_colours_cmd {
+    spb_session *s;
+    rgb fg, bg, cursor_fg, cursor_bg;
+} system_colours_cmd;
+
+static rgb rgb_from(uint32_t value)
+{
+    rgb c = { (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF };
+    return c;
+}
+
+/* Windows PuTTY's WM_SYSCOLORCHANGE: new colours, palette rebuilt. */
+static void cmd_system_colours(void *vctx)
+{
+    system_colours_cmd *cmd = vctx;
+    spb_session *s = cmd->s;
+    s->have_system_colours = true;
+    s->system_fg = cmd->fg;
+    s->system_bg = cmd->bg;
+    s->system_cursor_fg = cmd->cursor_fg;
+    s->system_cursor_bg = cmd->cursor_bg;
+    if (s->term)
+        term_notify_palette_changed(s->term);
+    sfree(cmd);
+}
+
+void spb_session_set_system_colours(spb_session *s, uint32_t fg, uint32_t bg,
+                                    uint32_t cursor_fg, uint32_t cursor_bg)
+{
+    system_colours_cmd *cmd = snew(system_colours_cmd);
+    cmd->s = s;
+    cmd->fg = rgb_from(fg);
+    cmd->bg = rgb_from(bg);
+    cmd->cursor_fg = rgb_from(cursor_fg);
+    cmd->cursor_bg = rgb_from(cursor_bg);
+    if (!spb_loop_post(cmd_system_colours, cmd))
+        modalfatalbox("SwiftPutty internal error: session used after core "
+                      "shutdown");
+}
 
 static void spb_tw_unthrottle(TermWin *tw, size_t bufsize)
 {
@@ -652,6 +799,10 @@ void spb_terminal_reconfigure(spb_session *s, Conf *oldconf)
                  conf_get_int(conf, CONF_vtmode));
     apply_conf(s);
     setup_clipboards(s->term, conf);
+    /* windows/window.c reconfiguration: the overrides come and go. */
+    if (conf_get_bool(oldconf, CONF_system_colour) !=
+        conf_get_bool(conf, CONF_system_colour))
+        term_notify_palette_changed(s->term);
     /* A new size comes from the frontend's window; scrollback alone is
      * applied here, as GTK does. */
     if (conf_get_int(oldconf, CONF_savelines) !=

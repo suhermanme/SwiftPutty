@@ -74,6 +74,11 @@ struct spb_session {
     struct spb_pending_prompt *prompt;
     struct spb_pending_prompt *log_prompt;
 
+    /* "Use system colours" (API v10): the frontend's colours, applied by
+     * palette_get_overrides when the setting is on. */
+    bool have_system_colours;
+    rgb system_fg, system_bg, system_cursor_fg, system_cursor_bg;
+
     /* The Special Commands last reported (code and arg of each entry),
      * which spb_session_special accepts. */
     SessionSpecial *specials;

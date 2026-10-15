@@ -36,6 +36,14 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     after a duplicate remote port forwarding.
   - `0009-rlogin-free-username-prompt.patch`: free the Rlogin user name
     prompt once it has been answered.
+  - `0010-http-proxy-blank-line-completes-headers.patch`: an HTTP proxy's
+    response headers end at their blank line, without waiting for more.
+  - `0011-proxy-socket-free-conf.patch`: free a proxied connection's copy
+    of the configuration when it closes.
+  - `0012-proxy-command-format-once.patch`: format the Telnet or local
+    proxy command a second time only after prompting for it.
+  - `0013-proxy-negotiator-init-reconnect.patch`: initialise the proxy
+    negotiator's reconnect flag.
   - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as
     upstream's OS X build does, so the Meta-key settings are saved.
   - At compile time (no source change), the session-storage functions of

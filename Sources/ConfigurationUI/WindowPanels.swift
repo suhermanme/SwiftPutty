@@ -61,6 +61,13 @@ struct SelectionPanel: View {
             SettingsGroup(title: "Control use of mouse") {
                 CheckboxSetting(model: model, label: "Shift overrides application's use of mouse",
                                 keyword: .mouseOverride)
+                // Windows PuTTY's option; GTK PuTTY behaves as
+                // Compromise, with Ctrl+right-click for its menu.
+                RadioSetting(model: model, label: "Action of mouse buttons:", keyword: .mouseIsXterm,
+                             options: [("Windows (Middle extends, Right brings up menu)", "2"),
+                                       ("Compromise (Middle extends, Right pastes)", "0"),
+                                       ("xterm (Right extends, Middle pastes)", "1")],
+                             horizontal: false)
                 RadioSetting(model: model,
                              label: "Default selection mode (Option+drag does the other one):",
                              keyword: .rectSelect,
@@ -120,6 +127,14 @@ struct CopyPanel: View {
                 .disabled(selection.isEmpty)
             }
         }
+        // Windows PuTTY's "format" getset of the same panel. Windows copies
+        // RTF to the clipboard; here the styled copy is RTF as well as
+        // plain text (docs/DECISIONS.md).
+        SettingsGroup(title: "Formatting of copied characters") {
+            CheckboxSetting(model: model,
+                            label: "Copy to clipboard in RTF as well as plain text",
+                            keyword: .pasteRTF)
+        }
     }
 }
 
@@ -145,6 +160,9 @@ struct ColoursPanel: View {
                 RadioSetting(model: model, label: "Indicate bolded text by changing:",
                              keyword: .boldAsColour,
                              options: [("The font", "0"), ("The colour", "1"), ("Both", "2")])
+                // Windows PuTTY's option: here macOS's text colours, which
+                // follow light and dark mode.
+                CheckboxSetting(model: model, label: "Use system colours", keyword: .useSystemColours)
             }
             SettingsGroup(title: "Adjust the precise colours SwiftPutty displays") {
                 Text("Select a colour from the list, and then change its red, green and blue values or click Modify.")

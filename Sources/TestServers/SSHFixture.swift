@@ -26,7 +26,7 @@ public final class SSHFixture: @unchecked Sendable {
     }
 
     /// The repository root, from this file's location.
-    static let repositoryRoot = URL(fileURLWithPath: #filePath)
+    public static let repositoryRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
     static var hostArchitecture: String {
