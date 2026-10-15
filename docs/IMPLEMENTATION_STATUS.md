@@ -116,8 +116,8 @@ Swift 6.4 / CMake 4.4.3.
     Option-Return both ways, Dock bounce until activated on a bell in the
     background, the colour picker (Modify… sets the RGB values; the
     background changes on Apply), the character class table ('.' set to
-    class 1: double-click selects "foo", not "foo.bar"). Bell sounds not
-    heard.
+    class 1: double-click selects "foo", not "foo.bar"), the bell's
+    system alert sound (three bells from the server, three sounds heard).
   - M07/M08: Change Settings applied mid-session; Tunnels: a local
     forwarding added and used, then edited (Remove, new port, Add: the
     old port closes, the new one forwards), a remote one (uppity listens)
@@ -627,7 +627,7 @@ keeps UTF-8, as upstream); `exit 3` reported as exit status 3.
   bounce, Option-Return, always-on-top, the colour picker, the character
   class table (logic and layout are tested; the terminal-side behaviour
   was checked against the LAN server through the bridge, above).
-  (Since clicked through, all but the bell sound: see M13.)
+  (Since clicked through, the bell sound included: see M13.)
 - Not offered: GTK's Window/Fonts panel (separate bold and wide fonts,
   shadow bold), "When window is resized" (font-size resizing), scrollbar
   in full screen, "Allow variable-pitch fonts", Windows' mouse-button mode
