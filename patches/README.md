@@ -37,3 +37,4 @@ Each patch:
 | `0021-gss-macos-library-names.patch` | The GSSAPI loader looked only for `.so` libraries; on macOS it now loads `GSS.framework` and `libgssapi_krb5.dylib` | Not yet reported; could be offered (macOS support) |
 | `0022-fd-socket-no-sigpipe.patch` | Writing to a local command that had exited raised SIGPIPE and ended the whole process | Not yet reported; suitable for upstream |
 | `0023-gssapi-free-userauth-mic.patch` | Each GSSAPI login leaked the MIC buffer from `get_mic()` | Not yet reported; suitable for upstream |
+| `0024-macos-intel-gssapi-abi-packing.patch` | Match Apple's 2-byte packed GSSAPI types for dynamic GSSAPI on Intel macOS; prevents the OID layout mismatch that crashed in `GSS.framework` | Not yet reported; suitable for upstream |

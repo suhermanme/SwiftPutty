@@ -64,6 +64,8 @@ product and is not affiliated with or endorsed by the PuTTY developers.
     exited reports an error instead of raising SIGPIPE.
   - `0023-gssapi-free-userauth-mic.patch`: free the GSSAPI MIC after a
     login uses it.
+  - `0024-macos-intel-gssapi-abi-packing.patch`: match Apple's packed
+    GSSAPI ABI on Intel macOS.
   - At link time, `unix/utils/subprocess_waiter.c` is replaced by
     SwiftPutty's own waiter, which installs no signal handler.
   - At compile time, `OSX_META_KEY_CONFIG` is defined for `settings.c`, as

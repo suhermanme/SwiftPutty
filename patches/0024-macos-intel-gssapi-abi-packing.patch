@@ -1,0 +1,27 @@
+SwiftPutty local patch 0024
+Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
+Status:   not yet reported upstream; suitable for upstream
+
+GSSAPI dynamic ABI: match Apple's packed types on Intel macOS.
+
+Apple's GSS headers use 2-byte packing on Intel macOS for compatibility
+with MIT Kerberos. PuTTY's dynamic GSSAPI declarations must use the same
+packing; otherwise gss_OID_desc has a different elements offset, and
+GSS.framework crashes while copying the host-based-service OID.
+
+--- a/ssh/pgssapi.h
++++ b/ssh/pgssapi.h
+@@ -20,0 +21,4 @@
++#if defined(__APPLE__) && (defined(__i386__) || defined(__x86_64__))
++#pragma pack(push, 2)
++#endif
++
+@@ -220,4 +224,8 @@
+ extern const_gss_OID GSS_C_NT_ANONYMOUS;
+ extern const_gss_OID GSS_C_NT_EXPORT_NAME;
+ 
++#if defined(__APPLE__) && (defined(__i386__) || defined(__x86_64__))
++#pragma pack(pop)
++#endif
++
+ #endif /* STATIC_GSSAPI */
