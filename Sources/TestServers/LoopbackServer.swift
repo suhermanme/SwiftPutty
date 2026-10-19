@@ -71,6 +71,13 @@ public final class LoopbackServer: @unchecked Sendable {
     }
 
     private static func serve(_ client: Int32, _ behaviour: Behaviour) {
+        // A test that releases its session with output still in flight
+        // (e.g. backpressure tests) closes `client`'s peer while this
+        // thread may be mid-write; without this, the default SIGPIPE
+        // disposition kills the whole test process instead of failing
+        // just the write.
+        var one: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         switch behaviour {
         case .greetAndClose(let greeting):
             _ = Array(greeting.utf8).withUnsafeBytes { write(client, $0.baseAddress, $0.count) }

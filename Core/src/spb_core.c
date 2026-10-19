@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,6 +137,16 @@ bool spb_core_init(const spb_core_options *options, char **err_out)
     unsetenv("PUTTYSSHHOSTCAS");
     unsetenv("PUTTYRANDOMSEED");
     unsetenv("PUTTYSESSIONS");
+
+    /*
+     * Every upstream Unix frontend (plink, pageant, uppity,
+     * main-gtk-simple) ignores SIGPIPE at startup so that a socket write
+     * racing with the peer resetting the connection returns EPIPE to the
+     * caller instead of killing the whole process. SwiftPutty has no
+     * frontend main() of its own to do this, so the bridge does it here,
+     * once, before any socket exists.
+     */
+    putty_signal(SIGPIPE, SIG_IGN);
 
     /* Upstream's global trees must exist before the loop first scans
      * them. The thread is created afterwards, which orders these writes

@@ -997,3 +997,28 @@ ZIP plus SHA-256 checksum. No notarization is attempted.
 may block an app downloaded from the Internet until the user explicitly
 allows it. A Developer ID identity or notarization is not required by the
 release workflow.
+
+## D-048 — Ignore SIGPIPE in the bridge, not just in test mains
+
+**Status:** Accepted (M15)
+**Context:** Every upstream Unix frontend (`plink`, `pageant`, `uppity`,
+`main-gtk-simple`) ignores `SIGPIPE` at startup, so a socket write racing
+with the peer resetting the connection returns `EPIPE` to the caller
+instead of killing the process with an uncaught signal. SwiftPutty has no
+frontend `main()` of its own — `spb_core_init` is the one place every
+session passes through — and had never set this, so only the C test
+binaries (which set it themselves) were protected; the shipped app and the
+Swift test host process were not. A Swift test (`CoreThreadTests
+.releaseWithUnacknowledgedOutputDoesNotHang`, M14) released a session
+while its loopback test peer could still be mid-`write()`; CI's own
+`LoopbackServer` test double raised `SIGPIPE` on that race and killed the
+whole `swift-testing` process (observed as "exited with unexpected signal
+code 13" in CI, initially mistaken for the Intel GSSAPI crash it
+accompanied).
+**Decision:** Call `putty_signal(SIGPIPE, SIG_IGN)` once in
+`spb_core_init`, matching every other upstream frontend. Also set
+`SO_NOSIGPIPE` on `LoopbackServer`'s accepted sockets so the Swift test
+host process is not exposed to the same race through its own test double.
+**Consequences:** A dropped connection now reaches PuTTY's own code as
+`EPIPE` from `write()`/`send()`, as upstream already assumes, instead of
+being able to take down the whole app or test process.
