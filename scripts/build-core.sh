@@ -94,9 +94,13 @@ if [[ $RUN_TESTS == 1 ]]; then
             section "Re-running spb_ssh_test under lldb for crash diagnostics"
             lldb_log="$BUILD/spb_ssh_test-lldb.log"
             (cd "$BUILD/core-$HOST_ARCH" \
-                && lldb --batch -o run -k "thread backtrace all" -- ./spb_ssh_test) \
+                && lldb --batch -o run -k "thread backtrace all" \
+                    -k "frame select 3" -k "frame variable host_buf" \
+                    -k "expression -- GSS_C_NT_HOSTBASED_SERVICE" \
+                    -k "expression -- *GSS_C_NT_HOSTBASED_SERVICE" \
+                    -- ./spb_ssh_test) \
                 > "$lldb_log" 2>&1 || true
-            backtrace="$(awk '/thread #[0-9]+|frame #[0-9]+:|stop reason =/ {
+            backtrace="$(awk '/thread #[0-9]+|frame #[0-9]+:|stop reason =|host_buf|GSS_C_NT_HOSTBASED_SERVICE|length =|elements =|value =/ {
                 gsub(/%/, "%25"); gsub(/\r/, "%0D");
                 printf "%s%%0A", $0
             }' "$lldb_log")"
