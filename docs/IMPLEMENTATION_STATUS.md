@@ -16,10 +16,29 @@
 | **M11** | Additional PuTTY backends | **COMPLETE** (2026-10-15) |
 | **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
 | **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
-| M14 | Performance pass | NOT STARTED |
+| M14 | Performance pass | IN PROGRESS |
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M14 — Performance pass (in progress)
+
+**Started**
+
+- `TerminalRenderer` caches successful and missing primary-font glyph
+  lookups across redraws. The cache is bounded at 4,096 entries and is
+  cleared when full.
+
+**Still required**
+
+- Measure rendering and core-to-main-thread costs under representative
+  output before claiming a performance improvement.
+- Bound raw-output event buffering without dropping session data. This
+  needs a consumption acknowledgement and backpressure path into the core;
+  switching the event stream to a lossy bounded policy would silently
+  discard output.
+- Measure the shared-core-thread impact of blocking DNS and decide whether
+  resolution should move to a helper thread or process.
 
 ## M13 — Security and reliability hardening
 

@@ -37,6 +37,10 @@ session without reconnecting, as PuTTY does, including adding, removing
 and editing SSH port forwardings (a failed edit keeps the old one). See
 `docs/IMPLEMENTATION_STATUS.md`.
 
+M14 (performance) is in progress; its first change caches terminal glyph
+lookups. Profiling, output-flow control and the shared-thread DNS decision
+remain open.
+
 ## Building
 
 Requirements: macOS 14+, Xcode 26 (Swift 6), CMake ≥ 3.20, Ninja, Perl.

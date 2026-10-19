@@ -19,9 +19,14 @@ public struct TerminalRenderer {
         var pointSize: CGFloat
     }
 
+    private enum GlyphLookup {
+        case found(CGGlyph)
+        case missing
+    }
+
     /// Terminal contents commonly survive many redraws. Keep Core Text's
     /// scalar-to-glyph lookup out of that repeated paint path.
-    private var glyphCache: [GlyphKey: CGGlyph] = [:]
+    private var glyphCache: [GlyphKey: GlyphLookup] = [:]
 
     public init(font: TerminalFont) {
         self.font = font
@@ -221,13 +226,19 @@ public struct TerminalRenderer {
         let key = GlyphKey(scalar: scalar.value,
                            fontName: CTFontCopyPostScriptName(font) as String,
                            pointSize: CTFontGetSize(font))
-        if let cached = glyphCache[key] { return cached }
+        if let cached = glyphCache[key] {
+            if case .found(let glyph) = cached { return glyph }
+            return nil
+        }
         var units = Array(String(scalar).utf16)
         var glyphs = [CGGlyph](repeating: 0, count: units.count)
-        guard units.count == 1, CTFontGetGlyphsForCharacters(font, &units, &glyphs, 1),
-              glyphs[0] != 0 else { return nil }
         if glyphCache.count >= 4096 { glyphCache.removeAll(keepingCapacity: true) }
-        glyphCache[key] = glyphs[0]
+        guard units.count == 1, CTFontGetGlyphsForCharacters(font, &units, &glyphs, 1),
+              glyphs[0] != 0 else {
+            glyphCache[key] = .missing
+            return nil
+        }
+        glyphCache[key] = .found(glyphs[0])
         return glyphs[0]
     }
 
