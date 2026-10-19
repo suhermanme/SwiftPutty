@@ -1100,3 +1100,32 @@ from this sandbox, unrelated to the procedure itself; recorded in
 documented procedure should still get its first genuine exercise — and
 likely a correction or two — the first time PuTTY actually ships a new
 release.
+
+## D-052 — Fix `fuzz_terminal`'s own reset sequence, not the terminal
+
+**Status:** Accepted (M17)
+**Context:** A coverage-guided libFuzzer campaign (M17; `-DSPB_LIBFUZZER=ON`,
+an LLVM clang, ASan+UBSan) found an input that made `spb_fuzz_terminal`
+abort after its 30-second "the terminal stopped processing input"
+timeout. The input left the terminal mid-`ESC Y` (VT52 direct cursor
+addressing) when the harness's per-input reset sequence
+(`CAN ESC < ESC \ ESC [4i ESC c` + marker) ran. `terminal/terminal.c`'s
+`VT52_Y1`/`VT52_Y2` (and the `VT52_PLUS` `VT52_FG`/`VT52_BG`) termstates
+sit above the `DO_CTRLS` sentinel in its `termstate` enum, so the
+universal C0-control handling that lets `CAN` or `ESC` abort most
+sequences does not apply there: those states unconditionally consume
+the next byte as literal cursor-address/colour data, exactly like real
+VT52 hardware. That is correct, spec-faithful behaviour, not a PuTTY
+bug: the harness's reset sequence swallows part of itself as those
+data bytes, never actually leaves VT52 mode, and the marker lands
+somewhere other than row 0 — hence the timeout.
+**Decision:** Prepend two NUL bytes to the harness's reset sequence in
+`Core/tests/fuzz/fuzz_terminal.c`. Two bytes is the deepest such state
+(`VT52_Y1` → `VT52_Y2` → `TOPLEVEL`); in `TOPLEVEL` they are harmless,
+unmatched C0 controls. Built with `memcpy`, not `snprintf` (a leading
+`\x00` would end a format string immediately). The crash input is kept
+as a new corpus seed (`Core/tests/fuzz/corpus/terminal/vt52-y-address-sync-gap`).
+No `patches/` entry: `Vendor/putty/` is untouched and correct here.
+**Consequences:** Re-running the campaign (arm64, ~7,800 terminal runs
+and ~73,000 parser runs over 3 minutes each) found nothing further.
+Closes the D-042 "coverage-guided campaign... left for M17" note.

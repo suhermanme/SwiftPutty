@@ -207,13 +207,29 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     spb_session_resize(session, 80, 24, 0, 0);
     spb_core_barrier();
 
-    /* CAN ends any sequence; ESC < leaves VT52 mode; ST ends a string;
-     * ESC [4i ends printing; RIS resets the rest. Then the marker. */
+    /* VT52's direct cursor address (ESC Y row col) and the VT52_PLUS
+     * FG/BG escapes consume their following byte(s) as literal data,
+     * not as control characters, exactly like real VT52 hardware
+     * (terminal/terminal.c: these termstates are >= DO_CTRLS, so even
+     * CAN or ESC is just swallowed as that byte). A mutated input that
+     * ends mid-sequence there would otherwise eat part of the CAN/ESC
+     * reset below as cursor-address bytes. Two filler bytes guarantee
+     * landing back in TOPLEVEL first (the deepest such state is two
+     * bytes long); in TOPLEVEL they are harmless unmatched C0 controls.
+     *
+     * Then: CAN ends any sequence; ESC < leaves VT52 mode; ST ends a
+     * string; ESC [4i ends printing; RIS resets the rest. The marker.
+     */
     char marker[64], sync[96];
     snprintf(marker, sizeof(marker), "fuzzsync%lu", ++marker_count);
-    int n = snprintf(sync, sizeof(sync),
-                     "\x18\x1b<\x1b\\\x1b[4i\x1b" "c%s", marker);
-    send_all(sync, (size_t)n);
+    /* Built with memcpy, not snprintf: the leading NULs would end a
+     * format string right there. */
+    static const char sync_prefix[] = "\x00\x00\x18\x1b<\x1b\\\x1b[4i\x1b" "c";
+    size_t prefix_len = sizeof(sync_prefix) - 1, marker_len = strlen(marker);
+    memcpy(sync, sync_prefix, prefix_len);
+    memcpy(sync + prefix_len, marker, marker_len);
+    size_t n = prefix_len + marker_len;
+    send_all(sync, n);
 
     double deadline = now() + 30;
     for (;;) {
