@@ -1819,26 +1819,31 @@ int main(void)
         return 2;
     }
 
+#define RUN_TEST(call) do {                                           \
+        fprintf(stderr, "running %s\n", #call);                       \
+        call;                                                         \
+    } while (0)
+
     fixture server = fixture_start("hostkey-a.ppk", 0);
-    test_first_connection(&server);
-    test_stored_key_and_wrong_password(&server);
-    test_live_reconfigure(&server);
-    test_port_forwarding(&server);
-    test_session_operations(&server);
-    test_ssh_jump_proxy(&server);
-    test_environment(&server);
-    test_logs_omit_passwords(&server);
-    test_gssapi_defaults_do_not_delay(&server);
-    test_connection_sharing(&server);
-    test_manual_host_keys();
-    test_host_cas();
-    test_agent();
-    test_restart_after_failure();
-    test_accept_once_and_cancel();
-    test_changed_host_key(&server);
-    test_public_key_auth();
-    test_kerberos();
-    kerberos_teardown();
+    RUN_TEST(test_first_connection(&server));
+    RUN_TEST(test_stored_key_and_wrong_password(&server));
+    RUN_TEST(test_live_reconfigure(&server));
+    RUN_TEST(test_port_forwarding(&server));
+    RUN_TEST(test_session_operations(&server));
+    RUN_TEST(test_ssh_jump_proxy(&server));
+    RUN_TEST(test_environment(&server));
+    RUN_TEST(test_logs_omit_passwords(&server));
+    RUN_TEST(test_gssapi_defaults_do_not_delay(&server));
+    RUN_TEST(test_connection_sharing(&server));
+    RUN_TEST(test_manual_host_keys());
+    RUN_TEST(test_host_cas());
+    RUN_TEST(test_agent());
+    RUN_TEST(test_restart_after_failure());
+    RUN_TEST(test_accept_once_and_cancel());
+    RUN_TEST(test_changed_host_key(&server));
+    RUN_TEST(test_public_key_auth());
+    RUN_TEST(test_kerberos());
+    RUN_TEST(kerberos_teardown());
 
     CHECK(spb_core_barrier());
     CHECK(spb_debug_live_sessions() == 0);

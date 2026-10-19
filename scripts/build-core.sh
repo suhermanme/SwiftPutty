@@ -86,9 +86,15 @@ xcodebuild -create-xcframework \
     -output "$BUILD/SwiftPuttyCore.xcframework" > /dev/null
 lipo -info "$UNIVERSAL/libSwiftPuttyCore.a"
 
-if [[ $RUN_TESTS == 1 ]]; then
     section "C bridge tests ($HOST_ARCH)"
-    (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure --timeout 600)
+    if ! (cd "$BUILD/core-$HOST_ARCH" && ctest --output-on-failure --timeout 600); then
+        if [[ "$HOST_ARCH" == "x86_64" ]]; then
+            section "Re-running spb_ssh_test under lldb for crash diagnostics"
+            (cd "$BUILD/core-$HOST_ARCH" \
+                && lldb --batch -o run -o "thread backtrace all" -- ./spb_ssh_test) || true
+        fi
+        exit 1
+    fi
     for test in spb_bridge_test spb_session_test spb_terminal_test \
                 spb_ssh_test spb_backends_test; do
         section "$test under leaks --atExit ($HOST_ARCH)"
