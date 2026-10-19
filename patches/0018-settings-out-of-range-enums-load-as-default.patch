@@ -1,6 +1,6 @@
 SwiftPutty local patch 0018
 Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
-Status:   not yet reported upstream; should be (a damaged session aborts)
+Status:   reported upstream (2026-10-19); should be (a damaged session aborts)
 
 Settings: the two hand-loaded enum settings load an unknown saved value
 as their default.

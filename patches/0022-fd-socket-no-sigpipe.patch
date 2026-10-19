@@ -1,6 +1,6 @@
 SwiftPutty local patch 0022
 Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
-Status:   not yet reported upstream; suitable for upstream
+Status:   reported upstream (2026-10-19); suitable for upstream
 
 fd sockets: a write to a command that has exited fails with EPIPE
 instead of raising SIGPIPE.

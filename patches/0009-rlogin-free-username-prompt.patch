@@ -1,6 +1,6 @@
 SwiftPutty local patch 0009
 Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
-Status:   not yet reported upstream; suitable for upstream
+Status:   reported upstream (2026-10-19); suitable for upstream
 
 Free the Rlogin user name prompt once it has been answered.
 

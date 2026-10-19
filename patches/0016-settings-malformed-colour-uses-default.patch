@@ -1,6 +1,6 @@
 SwiftPutty local patch 0016
 Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
-Status:   not yet reported upstream; should be (a damaged session aborts)
+Status:   reported upstream (2026-10-19); should be (a damaged session aborts)
 
 Settings: a saved colour that is not three numbers loads as the default.
 

@@ -1129,3 +1129,30 @@ No `patches/` entry: `Vendor/putty/` is untouched and correct here.
 **Consequences:** Re-running the campaign (arm64, ~7,800 terminal runs
 and ~73,000 parser runs over 3 minutes each) found nothing further.
 Closes the D-042 "coverage-guided campaign... left for M17" note.
+
+## D-053 — Report 21 local patches upstream in one combined email
+
+**Status:** Accepted (M17)
+**Context:** M17 drafted five grouped upstream bug reports (by theme:
+leaks; use-after-free/UB; proxy and credential handling; settings
+robustness; macOS portability) covering 22 of the 24 local patches
+(`patches/README.md`), excluding `0006` (a SwiftPutty-specific API
+addition, not a bug) and `0017` (the private security report, which
+the user chose to skip reporting for now). The user asked to combine
+all 22 into a single email instead of five separate ones. (The
+combined draft's own subject line undercounted this as "21 bugs" —
+caught after sending; the five sections' patches sum to 22, matching
+the 22 status lines actually updated below.)
+**Decision:** Combine the five drafts into one message to
+`putty@projects.tartarus.org`, grouped into the same five sections
+with a short table of contents. Clean up internal-only cross-references
+("Applies after patch 00NN") that meant nothing to an outside reader
+before sending. The user sent it 2026-10-19. Updated every reported
+patch's own `Status:` header, and the upstream-status column in
+`patches/README.md` and `docs/UPSTREAM_PUTTY.md`, to
+"Reported upstream (2026-10-19)" (22 patches).
+**Consequences:** `0006` and `0017` remain the only local patches not
+reported upstream, both intentionally (feature addition; user's call to
+hold the security report). Any reply from PuTTY's maintainers about the
+reported batch is new input to react to, not something this session can
+anticipate.

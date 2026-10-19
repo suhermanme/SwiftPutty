@@ -34,15 +34,15 @@
   bytes, not a PuTTY bug), fixed in the harness and kept as a
   regression seed (D-052). A second run of the same length found
   nothing further.
-- Draft upstream reports for the patches marked "suitable for upstream"
-  or "should be" in `patches/README.md` (23 of 24; excludes `0017`,
-  already drafted separately as a private report, and `0006`, a
-  SwiftPutty-specific API addition rather than a bug). Grouped by theme
+- Reported 22 of the 24 local patches upstream (2026-10-19), combined
+  into one email to `putty@projects.tartarus.org`, grouped by theme
   (leaks; use-after-free/UB; proxy and credential handling; settings
-  robustness found by fuzzing; macOS portability) into five drafts in
-  the session scratchpad — not sent, and not committed (same handling
-  as the `0017` draft): sending anything to PuTTY's maintainers is the
-  user's call, not this session's.
+  robustness found by fuzzing; macOS portability). Excludes `0006`
+  (a SwiftPutty-specific API addition, not a bug) and `0017` (the
+  private security report; the user chose to skip reporting it for
+  now). Each reported patch's header and the status columns in
+  `patches/README.md` and this file's upstream table are updated to
+  "Reported upstream (2026-10-19)".
 - A final sweep: every risk in `docs/ARCHITECTURE.md`'s `R-1`..`R-8`
   register is closed, mitigated, or has a stated reason for staying
   open (none do, as of this sweep); `THIRD_PARTY_NOTICES.md` lists the
@@ -51,8 +51,8 @@
 
 **Limitations / not done**
 
-- Nothing from this audit is sent anywhere. `0017`'s private report and
-  the five grouped drafts above are both still just drafts.
+- `0017`'s private report is still just a draft; the user chose not to
+  send it for now.
 - The fuzzing campaign is still not coverage-guided over a long/CI
   timescale, just a one-off local run; nothing currently re-runs it
   with `-DSPB_LIBFUZZER=ON` on a schedule.

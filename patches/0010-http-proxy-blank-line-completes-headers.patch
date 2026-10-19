@@ -1,6 +1,6 @@
 SwiftPutty local patch 0010
 Upstream: PuTTY 0.85 (a3cce3a48d4ab12e0fccb32998b9042d4f7c3ff1)
-Status:   not yet reported upstream; should be (a proxy connection can hang)
+Status:   reported upstream (2026-10-19); should be (a proxy connection can hang)
 
 HTTP proxy: complete the blank line that ends the response headers at
 once.
