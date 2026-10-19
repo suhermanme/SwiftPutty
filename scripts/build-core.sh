@@ -95,7 +95,8 @@ if [[ $RUN_TESTS == 1 ]]; then
             lldb_log="$BUILD/spb_ssh_test-lldb.log"
             (cd "$BUILD/core-$HOST_ARCH" \
                 && lldb --batch -o run -k "thread backtrace all" \
-                    -k "frame select 3" -k "frame variable host_buf" \
+                    -k "thread select 2" -k "frame select 3" \
+                    -k "frame variable host_buf" \
                     -k "expression -- GSS_C_NT_HOSTBASED_SERVICE" \
                     -k "expression -- *GSS_C_NT_HOSTBASED_SERVICE" \
                     -- ./spb_ssh_test) \
