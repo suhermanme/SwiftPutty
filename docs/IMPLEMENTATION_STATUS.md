@@ -46,8 +46,13 @@ not notarized.
 - `scripts/package-release.sh 0.1.0`: universal Release build, arm64 and
   x86_64 verification, signature verification, ZIP and checksum creation —
   PASS.
-- GitHub tag-triggered publication is configured but cannot be exercised
-  from this local run.
+- GitHub release workflow for tag `v0.1.0` (run
+  [39226656168](https://github.com/suhermanme/SwiftPutty/actions/runs/39226656168)):
+  **FAILED** at the universal app build/package step; the publish step was
+  skipped, and no GitHub Release was created. The public run summary exposes
+  no build diagnostic; reading the logs requires a `GITHUB_TOKEN`. Local
+  Xcode 26.6 is not installed here, so the hosted failure could not be
+  reproduced locally.
 
 ## M14 — Performance pass (complete)
 
