@@ -46,9 +46,12 @@ Telnet) and diverges from upstream's loop.
 `unix/cliloop.c`, with a self-pipe for wakeups and a locked command queue.
 All bridge calls enqueue. All PuTTY callbacks run on that thread and are
 forwarded to Swift, which hops to `@MainActor`.
-**Consequences:** Exact upstream event semantics. A slow DNS lookup in one
-session can stall others (risk R-2; revisit by M14). *Amended by D-035
-(M11): the loop waits with `select()`, not `poll()`.*
+**Consequences:** Exact upstream event semantics. A blocking DNS lookup
+stalls all sessions on the core thread (risk R-2). M14's controlled
+measurement confirms that a 262.5 ms resolver hold delays another
+session's output by 262.7 ms; synchronous lookup remains pending future
+evidence of real-world resolver stalls. *Amended by D-035 (M11): the loop
+waits with `select()`, not `poll()`.*
 
 ## D-004 — Convert configuration through PuTTY's own settings code
 
@@ -942,3 +945,39 @@ developer's own Kerberos configuration and tickets are never used. Not
 covered: credential delegation (`GssapiFwd`) on the server side, other
 realms or KDCs (Active Directory), a manual check against a real
 deployment.
+
+## D-045 — Lossless raw-output backpressure with consumer acknowledgements
+
+**Status:** Accepted (M14)
+**Context:** PuTTY output callbacks copied every received byte into an
+unbounded Swift `AsyncStream`. A bounded lossy stream would discard terminal
+data; blocking the core callback would stall unrelated sessions and could
+deadlock UI work.
+**Decision:** API v13 tracks outstanding raw-output bytes per session. Once
+the count reaches 256 KiB, the bridge reports a saturated backlog to the
+backend; acknowledgements are coalesced into core-thread commands, and
+backends resume after the count drains to 128 KiB. Swift acknowledges output
+only after consuming each event. The terminal still parses the complete
+input, and one already-running backend read may exceed the threshold.
+**Consequences:** Raw-output storage has a 256 KiB high-water limit plus
+one in-flight read, without dropping or reordering bytes. The consumer
+contract requires all direct `PuTTYSession.events` readers to acknowledge
+each `.output` event. Core tests and Swift tests cover sustained transfer,
+pause/resume, exact byte equality and release with unacknowledged output.
+
+## D-046 — Keep synchronous DNS, with measured shared-thread impact
+
+**Status:** Accepted (M14)
+**Context:** PuTTY's `getaddrinfo` runs synchronously on the single core
+thread. Async lookup would change the synchronous lookup contract used by
+multiple backends.
+**Decision:** Keep synchronous resolution for now. A deterministic harness
+holds a sentinel `getaddrinfo` call for 262.5 ms while a second established
+session probes a loopback echo peer; its output arrives 262.7 ms after
+resolver entry, only after release. The harness establishes shared-thread
+impact independently of public DNS variability. Do not introduce a
+cross-backend async resolver without evidence that real-world resolver
+latency warrants the contract change.
+**Consequences:** DNS stalls remain process-wide. The 262.5 ms delay is a
+controlled test interval, not a measurement of actual DNS latency; real
+resolver behavior remains environment-dependent.

@@ -12,12 +12,14 @@
  * destroy_inst_connection).
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "spb_internal.h"
 
 static atomic_uint_fast64_t next_session_id = 1;
+static void post(spb_session *s, spb_command_fn fn, void *ctx);
 
 /* Sessions with a live connection that may change state by itself;
  * core thread only. */
@@ -70,11 +72,29 @@ void spb_session_emit_event_log(spb_session *s, const char *line)
         s->cb.event_log(s->cb_ctx, line);
 }
 
+size_t spb_session_output_backlog(spb_session *s, size_t terminal_backlog)
+{
+    /* Hysteresis avoids repeatedly freezing and unfreezing a high-volume
+     * backend around the high-water mark. */
+    if (s->raw_output_paused) {
+        if (s->raw_output_backlog <= SPB_SESSION_OUTPUT_BUFFER_LIMIT / 2)
+            s->raw_output_paused = false;
+    } else if (s->raw_output_backlog >= SPB_SESSION_OUTPUT_BUFFER_LIMIT) {
+        s->raw_output_paused = true;
+    }
+    return s->raw_output_paused ? SIZE_MAX : terminal_backlog;
+}
+
 void spb_session_emit_output(spb_session *s, const void *data, size_t len,
                              bool is_stderr)
 {
-    if (len && callbacks_enabled(s) && s->cb.output)
-        s->cb.output(s->cb_ctx, data, len, is_stderr);
+    if (!len || !callbacks_enabled(s) || !s->cb.output)
+        return;
+    if (len > SIZE_MAX - s->raw_output_backlog)
+        s->raw_output_backlog = SIZE_MAX;
+    else
+        s->raw_output_backlog += len;
+    s->cb.output(s->cb_ctx, data, len, is_stderr);
 }
 
 /* unix/window.c gtk_seat_update_specials_menu: the list is the
@@ -342,6 +362,47 @@ static void cmd_send_eof(void *vctx)
         backend_special(s->backend, SS_EOF, 0);
 }
 
+/* One queued core command drains coalesced acknowledgements. After
+ * clearing the queued flag, recheck the counter so a racing acknowledgement
+ * cannot be left waiting without a command. */
+static void cmd_ack_output(void *vctx)
+{
+    spb_session *s = (spb_session *)vctx;
+    size_t bytes = atomic_exchange(&s->raw_output_ack_bytes, 0);
+    if (bytes > s->raw_output_backlog)
+        bytes = s->raw_output_backlog;
+    s->raw_output_backlog -= bytes;
+    if (bytes && s->backend && !s->exited &&
+        backend_connected(s->backend))
+        backend_unthrottle(s->backend,
+                           spb_session_output_backlog(s, s->terminal_backlog));
+
+    atomic_store(&s->raw_output_ack_queued, false);
+    if (atomic_load(&s->raw_output_ack_bytes)) {
+        bool expected = false;
+        if (atomic_compare_exchange_strong(&s->raw_output_ack_queued,
+                                           &expected, true))
+            post(s, cmd_ack_output, s);
+    }
+}
+
+void spb_session_ack_output(spb_session *s, size_t bytes)
+{
+    if (!bytes)
+        return;
+
+    size_t pending = atomic_load(&s->raw_output_ack_bytes);
+    for (;;) {
+        size_t updated = bytes > SIZE_MAX - pending ?
+            SIZE_MAX : pending + bytes;
+        if (atomic_compare_exchange_weak(&s->raw_output_ack_bytes,
+                                         &pending, updated))
+            break;
+    }
+    if (!atomic_exchange(&s->raw_output_ack_queued, true))
+        post(s, cmd_ack_output, s);
+}
+
 static void cmd_close(void *vctx)
 {
     spb_session *s = (spb_session *)vctx;
@@ -494,8 +555,6 @@ static void cmd_release(void *vctx)
 
 /* ---------- Public API ---------- */
 
-static void post(spb_session *s, spb_command_fn fn, void *ctx);
-
 spb_session *spb_session_create(const spb_settings *settings,
                                 const spb_session_callbacks *callbacks,
                                 void *ctx, char **err_out)
@@ -519,6 +578,8 @@ spb_session *spb_session_create(const spb_settings *settings,
     s->cb_ctx = ctx;
     atomic_init(&s->released, false);
     atomic_init(&s->transport_id, 0);
+    atomic_init(&s->raw_output_ack_bytes, 0);
+    atomic_init(&s->raw_output_ack_queued, false);
     s->state = SPB_SESSION_CREATED;
     spb_seat_init(s);
 

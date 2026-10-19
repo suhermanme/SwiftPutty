@@ -30,14 +30,35 @@ enum KitTests {}
 /// wait for conditions on what has arrived so far.
 final class EventCollector: @unchecked Sendable {
     private let lock = NSLock()
+    private weak var session: PuTTYSession?
     private var buffer: [PuTTYSessionEvent] = []
     private var streamFinished = false
+    private var acknowledgingOutput: Bool
+    private var unacknowledgedOutputSizes: [Int] = []
+    private var outputBytesReceived = 0
     private var task: Task<Void, Never>?
 
-    init(_ events: AsyncStream<PuTTYSessionEvent>) {
+    init(_ session: PuTTYSession, acknowledgingOutput: Bool = true) {
+        self.session = session
+        self.acknowledgingOutput = acknowledgingOutput
+        let events = session.events
         task = Task.detached { [self] in
             for await event in events {
-                lock.withLock { buffer.append(event) }
+                var bytesToAcknowledge = 0
+                lock.withLock {
+                    buffer.append(event)
+                    if case .output(let data, _) = event {
+                        outputBytesReceived += data.count
+                        if self.acknowledgingOutput {
+                            bytesToAcknowledge = data.count
+                        } else {
+                            unacknowledgedOutputSizes.append(data.count)
+                        }
+                    }
+                }
+                if bytesToAcknowledge > 0 {
+                    self.session?.acknowledgeOutput(bytes: bytesToAcknowledge)
+                }
             }
             lock.withLock { streamFinished = true }
         }
@@ -47,6 +68,21 @@ final class EventCollector: @unchecked Sendable {
 
     var events: [PuTTYSessionEvent] { lock.withLock { buffer } }
     var finished: Bool { lock.withLock { streamFinished } }
+    var receivedOutputBytes: Int { lock.withLock { outputBytesReceived } }
+
+    /// Starts acknowledging output and releases everything collected
+    /// while acknowledgement was deliberately paused.
+    func resumeOutputAcknowledgements() {
+        let pending = lock.withLock {
+            acknowledgingOutput = true
+            defer { unacknowledgedOutputSizes.removeAll(keepingCapacity: true) }
+            return unacknowledgedOutputSizes
+        }
+
+        for bytes in pending {
+            session?.acknowledgeOutput(bytes: bytes)
+        }
+    }
 
     var states: [PuTTYSessionState] {
         events.compactMap { if case .stateChanged(let state, _) = $0 { state } else { nil } }

@@ -30,7 +30,11 @@
 extern "C" {
 #endif
 
-#define SPB_API_VERSION 12
+#define SPB_API_VERSION 13
+
+/* Maximum outstanding raw session-output bytes before the core applies
+ * backpressure. A backend read already in progress may extend the queue. */
+#define SPB_SESSION_OUTPUT_BUFFER_LIMIT 262144
 
 /* ---------- Library information ---------- */
 
@@ -369,8 +373,10 @@ typedef struct spb_session_callbacks {
                           const char *detail);
     /* One line of PuTTY's Event Log. */
     void (*event_log)(void *ctx, const char *line);
-    /* A copy of the data received from the backend, before the terminal
-     * interprets it (diagnostics and tests). */
+    /* A copy of data received from the backend, before terminal
+     * interpretation. Each delivered byte must be acknowledged by the
+     * consumer with spb_session_ack_output after it has been consumed.
+     * Outstanding bytes exert backend backpressure. */
     void (*output)(void *ctx, const void *data, size_t len, bool is_stderr);
     /* The remote end exited; exit_code as PuTTY's backend_exitcode()
      * (INT32_MAX for an unclean exit). Reported before CLOSED. */
@@ -487,6 +493,11 @@ void spb_session_answer_prompt(spb_session *session, uint64_t prompt_id,
 /* Send bytes to the backend (as typed input). Ignored unless the session
  * is CONNECTING or CONNECTED. data is copied before return. */
 void spb_session_send(spb_session *session, const void *data, size_t len);
+
+/* Acknowledge bytes from output callbacks after the frontend has
+ * consumed them. This is asynchronous and may be called from any thread.
+ * Call only for bytes previously delivered to this session. */
+void spb_session_ack_output(spb_session *session, size_t bytes);
 
 /* Send an end-of-file to the backend (PuTTY's SS_EOF special). */
 void spb_session_send_eof(spb_session *session);

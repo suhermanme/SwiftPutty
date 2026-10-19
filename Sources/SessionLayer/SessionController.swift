@@ -406,6 +406,7 @@ public final class SessionController {
             if transcript.count > Self.transcriptLimit {
                 transcript.removeFirst(transcript.count - Self.transcriptLimit)
             }
+            session?.acknowledgeOutput(bytes: data.count)
         case .remoteExit(let code):
             exitCode = code
         case .terminalUpdated:

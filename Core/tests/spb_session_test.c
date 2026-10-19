@@ -145,6 +145,7 @@ static int unused_port(void)
 typedef struct recorder {
     pthread_mutex_t lock;
     pthread_cond_t cond;
+    spb_session *session;
     spb_session_state states[8];
     int nstates;
     char *last_detail;
@@ -239,6 +240,7 @@ static void cb_output(void *ctx, const void *data, size_t len,
     memcpy(r->output + r->output_len, data, len);
     r->output_len += len;
     r->output[r->output_len] = '\0';
+    spb_session_ack_output(r->session, len);
     rec_leave(r);
 }
 
@@ -408,6 +410,7 @@ static spb_session *new_session(spb_settings *settings, recorder *r)
     CHECK(s != NULL);
     CHECK(err == NULL);
     spb_string_free(err);
+    r->session = s;
     return s;
 }
 

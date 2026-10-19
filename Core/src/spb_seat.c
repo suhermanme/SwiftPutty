@@ -21,13 +21,15 @@ static spb_session *seat_session(Seat *seat)
 }
 
 /* unix/window.c gtk_seat_output: everything goes to the terminal, whose
- * backlog throttles the backend (TermWin unthrottle releases it). */
+ * backlog throttles the backend (TermWin unthrottle releases it). Raw
+ * output awaiting Swift consumption can independently pause the backend. */
 static size_t spb_seat_output(Seat *seat, SeatOutputType type,
                               const void *data, size_t len)
 {
     spb_session *s = seat_session(seat);
     spb_session_emit_output(s, data, len, type == SEAT_OUTPUT_STDERR);
-    return term_data(s->term, data, len);
+    s->terminal_backlog = term_data(s->term, data, len);
+    return spb_session_output_backlog(s, s->terminal_backlog);
 }
 
 static bool spb_seat_eof(Seat *seat)

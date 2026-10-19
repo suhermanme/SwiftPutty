@@ -653,8 +653,9 @@ void spb_session_set_system_colours(spb_session *s, uint32_t fg, uint32_t bg,
 static void spb_tw_unthrottle(TermWin *tw, size_t bufsize)
 {
     spb_session *s = termwin_session(tw);
+    s->terminal_backlog = bufsize;
     if (s->backend)
-        backend_unthrottle(s->backend, bufsize);
+        backend_unthrottle(s->backend, spb_session_output_backlog(s, bufsize));
 }
 
 static const TermWinVtable spb_termwin_vt = {

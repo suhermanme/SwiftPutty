@@ -60,14 +60,22 @@ struct spb_session {
     LogContext *logctx;
     Backend *backend;
     Ldisc *ldisc;
+    spb_session_state state;
+    bool exited;
 
+    struct spb_screen *screen;
     /* Terminal (spb_terminal.c); term is created on the core thread. */
     Terminal *term;
     TermWin termwin;
     struct unicode_data ucsdata;
-    struct spb_screen *screen;         /* drawing grid + published frame */
-    spb_session_state state;
-    bool exited;                       /* connection gone or going */
+    /* Raw-output bytes yielded to the frontend but not yet acknowledged;
+     * the core thread tracks backlog, while acknowledgements are atomic
+     * so callers can coalesce them from any thread. */
+    size_t raw_output_backlog;
+    size_t terminal_backlog;
+    bool raw_output_paused;
+    atomic_size_t raw_output_ack_bytes;
+    atomic_bool raw_output_ack_queued;
 
     /* Dialogs awaiting an answer, one per slot as GTK PuTTY has them:
      * the connection's (host key, weak crypto) and the log file's. */
@@ -100,6 +108,7 @@ void spb_sessions_after_iteration(void); /* run by the loop */
 void spb_session_set_state(spb_session *s, spb_session_state state,
                            const char *detail);
 void spb_session_emit_event_log(spb_session *s, const char *line);
+size_t spb_session_output_backlog(spb_session *s, size_t terminal_backlog);
 void spb_session_emit_output(spb_session *s, const void *data, size_t len,
                              bool is_stderr);
 void spb_session_notify_remote_exit(spb_session *s);

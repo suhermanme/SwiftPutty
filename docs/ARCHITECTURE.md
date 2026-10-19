@@ -874,12 +874,19 @@ M13 (API v12) adds `spb_debug_gssapi_libraries` (D-043). The core no
 longer installs a SIGCHLD handler: local commands are reaped per pid by
 `spb_subprocess.c` (D-041).
 
+M14 (API v13) adds `spb_session_ack_output`. A consumer acknowledges each
+raw-output event after processing it; the core tracks outstanding bytes and
+throttles the session backend at 256 KiB, resuming below 128 KiB. The
+terminal parser still receives all bytes, and Swift's `SessionController`
+acknowledges only after updating the transcript. A read already in flight
+can extend the limit by that read's size.
+
 ## 11. Risks and open questions
 
 | ID | Risk | Mitigation / milestone |
 |---|---|---|
 | R-1 | H-1/H-2 upstream memory-safety bugs on forwarding paths | **Mitigated (M08):** reproduced under ASan, fixed by patches `0007`/`0008`, regression tests in `spb_ssh_test`; still to be reported upstream |
-| R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | Accept for M02–M10; measure; options: patch `name_lookup` to resolve on a helper thread, or per-session helper process (decide by M14) |
+| R-2 | Single core thread: blocking `getaddrinfo` in one session stalls all sessions | **Measured (M14):** deterministic 262.5 ms resolver hold delayed a second session's loopback probe until release (262.7 ms from resolver entry). Keep synchronous lookup for now: moving it changes upstream's synchronous networking contract across backends; revisit if measured real-world DNS stalls justify that cross-cutting change. |
 | R-3 | `load_open_settings` resets `NOT_SAVED` keys; overlay must preserve them (§6.3) | **Mitigated (M07):** unsaved keys copied from the running Conf generically over `conf_key_info[]`; `spb_debug_check_reconfigure_roundtrip` checks every key, and was shown to fail without the overlay |
 | R-4 | Universal build loses HW crypto if configured as one multi-arch CMake build | Per-arch configure + `lipo` (D-006, verified) |
 | R-5 | `TermWin` drawing on core thread vs AppKit on main | Frame snapshot design (§8); benchmark in M03/M14 |

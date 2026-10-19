@@ -36,7 +36,7 @@ extension KitTests {
             defer { server.stop() }
 
             var session: PuTTYSession? = try PuTTYSession(settings: rawSettings(port: server.port))
-            let collector = EventCollector(session!.events)
+            let collector = EventCollector(session!)
             session!.start()
             #expect(await collector.wait(for: .connected))
             session!.send("héllo, 世界\n")
@@ -59,7 +59,7 @@ extension KitTests {
             defer { server.stop() }
 
             let session = try PuTTYSession(settings: rawSettings(port: server.port))
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             session.start()
             #expect(await collector.wait(for: .closed))
             #expect(String(decoding: collector.output, as: UTF8.self) == "bye\n")
@@ -78,7 +78,7 @@ extension KitTests {
         @Test func refusedConnectionFails() async throws {
             try TestCore.initialize()
             let session = try PuTTYSession(settings: rawSettings(port: LoopbackServer.unusedPort()))
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             session.start()
             #expect(await collector.wait(for: .failed))
             #expect(collector.lastDetail?.contains("refused") == true)
@@ -88,7 +88,7 @@ extension KitTests {
         @Test func unknownHostFails() async throws {
             try TestCore.initialize()
             let session = try PuTTYSession(settings: rawSettings(host: "no-such-host.invalid", port: 9))
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             session.start()
             #expect(await collector.wait(for: .failed))
             #expect(collector.lastDetail?.hasPrefix("Unable to open connection to no-such-host.invalid") == true)
@@ -100,7 +100,7 @@ extension KitTests {
             settings["Protocol"] = "serial"
             settings["SerialLine"] = "/dev/spb-no-such-line"
             let session = try PuTTYSession(settings: settings)
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             session.start()
             #expect(await collector.wait(for: .failed))
             #expect(collector.states == [.connecting, .failed])
@@ -112,7 +112,7 @@ extension KitTests {
             let server = try LoopbackServer(.echo)
             defer { server.stop() }
             let session = try PuTTYSession(settings: rawSettings(port: server.port))
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             await MainActor.run { session.start() }
             #expect(await collector.wait(for: .connected))
             // The main thread was never needed for the connection.
@@ -129,7 +129,7 @@ extension KitTests {
                 for index in 0..<100 {
                     group.addTask {
                         let session = try PuTTYSession(settings: rawSettings(port: server.port))
-                        let collector = EventCollector(session.events)
+                        let collector = EventCollector(session)
                         let payload = "session \(index) payload\n"
                         session.start()
                         session.send(payload)
@@ -150,7 +150,7 @@ extension KitTests {
             let server = try LoopbackServer(.echo)
             defer { server.stop() }
             let session = try PuTTYSession(settings: rawSettings(port: server.port))
-            let collector = EventCollector(session.events)
+            let collector = EventCollector(session)
             session.start()
             #expect(await collector.wait(for: .connected))
 
@@ -165,6 +165,57 @@ extension KitTests {
             }
             #expect(await collector.wait(timeout: .seconds(60)) { $0.output.count >= payload.count })
             #expect(collector.output == payload)
+        }
+
+        @Test func slowOutputConsumerBackpressuresAndResumesLosslessly() async throws {
+            try TestCore.initialize()
+            let server = try LoopbackServer(.echo)
+            defer { server.stop() }
+            let session = try PuTTYSession(settings: rawSettings(port: server.port))
+            let collector = EventCollector(session, acknowledgingOutput: false)
+            session.start()
+            #expect(await collector.wait(for: .connected))
+
+            var generator = SystemRandomNumberGenerator()
+            let payload = Data((0..<(1 << 20)).map { index in
+                index % 80 == 79 ? 0x0A : UInt8.random(in: 0x21...0x7E, using: &generator)
+            })
+            stride(from: 0, to: payload.count, by: 64 << 10).forEach {
+                session.send(payload[$0..<min($0 + (64 << 10), payload.count)])
+            }
+
+            #expect(await collector.wait(timeout: .seconds(30)) {
+                $0.receivedOutputBytes >= PuTTYSession.outputBufferLimit
+            })
+            try await Task.sleep(for: .milliseconds(250))
+            let settledCount = collector.receivedOutputBytes
+            try await Task.sleep(for: .milliseconds(250))
+            #expect(collector.receivedOutputBytes == settledCount)
+            #expect(settledCount < payload.count)
+            #expect(settledCount <= PuTTYSession.outputBufferLimit + (64 << 10))
+
+            collector.resumeOutputAcknowledgements()
+            #expect(await collector.wait(timeout: .seconds(60)) {
+                $0.receivedOutputBytes >= payload.count
+            })
+            #expect(collector.output == payload)
+        }
+
+        @Test func releaseWithUnacknowledgedOutputDoesNotHang() async throws {
+            try TestCore.initialize()
+            let server = try LoopbackServer(.echo)
+            defer { server.stop() }
+            var session: PuTTYSession? = try PuTTYSession(settings: rawSettings(port: server.port))
+            let collector = EventCollector(session!, acknowledgingOutput: false)
+            session!.start()
+            #expect(await collector.wait(for: .connected))
+            session!.send(Data(repeating: 0x61, count: 1 << 20))
+            #expect(await collector.wait(timeout: .seconds(30)) {
+                $0.receivedOutputBytes >= PuTTYSession.outputBufferLimit
+            })
+
+            session = nil
+            #expect(await collector.waitForFinish(timeout: .seconds(10)))
         }
     }
 }

@@ -97,6 +97,8 @@ public struct TerminalRenderer {
             let wide = cell.flags.contains(.wide)
             let ctFont = font.font(bold: bold, wide: wide) as CTFont
             let shadow = bold && font.shadowBold
+            let fontName = CTFontCopyPostScriptName(ctFont) as String
+            let pointSize = CTFontGetSize(ctFont)
             var glyphs: [CGGlyph] = []
             var positions: [CGPoint] = []
             var runColumn = column
@@ -105,7 +107,9 @@ public struct TerminalRenderer {
                 if c.flags.contains(.wideContinuation) { runColumn += 1; continue }
                 guard c.foreground == cell.foreground, c.flags.contains(.bold) == bold,
                       c.flags.contains(.wide) == wide,
-                      c.scalars.count == 1, let glyph = glyph(for: c.scalars[0], in: ctFont)
+                      c.scalars.count == 1,
+                      let glyph = glyph(for: c.scalars[0], fontName: fontName,
+                                        pointSize: pointSize, in: ctFont)
                 else { break }
                 glyphs.append(glyph)
                 positions.append(CGPoint(x: CGFloat(runColumn) * w, y: 0))
@@ -222,10 +226,9 @@ public struct TerminalRenderer {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private mutating func glyph(for scalar: Unicode.Scalar, in font: CTFont) -> CGGlyph? {
-        let key = GlyphKey(scalar: scalar.value,
-                           fontName: CTFontCopyPostScriptName(font) as String,
-                           pointSize: CTFontGetSize(font))
+    private mutating func glyph(for scalar: Unicode.Scalar, fontName: String,
+                                pointSize: CGFloat, in font: CTFont) -> CGGlyph? {
+        let key = GlyphKey(scalar: scalar.value, fontName: fontName, pointSize: pointSize)
         if let cached = glyphCache[key] {
             if case .found(let glyph) = cached { return glyph }
             return nil

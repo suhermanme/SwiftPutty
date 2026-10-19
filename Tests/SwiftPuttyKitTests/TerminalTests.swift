@@ -201,6 +201,36 @@ extension KitTests {
             #expect(await term.waitForRow(23, "line 60"))
         }
 
+        @Test func renderPerformanceMeasurement() async throws {
+            guard ProcessInfo.processInfo.environment["SPB_PERF_BENCHMARK"] == "1" else { return }
+            let term = try ScriptedTerminal()
+            defer { term.close() }
+            let line = String(repeating: "x", count: 80)
+            term.peer.send(Array(repeating: line, count: 24).joined(separator: "\r\n"))
+            #expect(await term.wait { $0.cell(column: 79, row: 23).scalars.count == 1 })
+
+            var renderer = term.view.renderer
+            let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1200,
+                                          pixelsHigh: 480, bitsPerSample: 8,
+                                          samplesPerPixel: 4, hasAlpha: true,
+                                          isPlanar: false, colorSpaceName: .deviceRGB,
+                                          bytesPerRow: 0, bitsPerPixel: 0)!
+            let context = NSGraphicsContext(bitmapImageRep: bitmap)!.cgContext
+            let clock = ContinuousClock()
+            for _ in 0..<10 { renderer.draw(term.screen, rows: 0..<24, in: context) }
+            let started = clock.now
+            for _ in 0..<100 { renderer.draw(term.screen, rows: 0..<24, in: context) }
+            let elapsed = started.duration(to: clock.now)
+            print("SPB_RENDER_BENCHMARK rows=24 columns=80 frames=100 elapsed=\(elapsed)")
+
+            let bytes = 128 * 1024
+            let previousCount = term.controller.receivedByteCount
+            let outputStarted = clock.now
+            term.peer.send(String(repeating: "x", count: bytes))
+            #expect(await waitUntil { term.controller.receivedByteCount >= previousCount + bytes })
+            print("SPB_OUTPUT_BENCHMARK bytes=\(bytes) elapsed=\(outputStarted.duration(to: clock.now))")
+        }
+
         @Test func rendersCellsIntoPixels() async throws {
             let term = try ScriptedTerminal()
             defer { term.close() }

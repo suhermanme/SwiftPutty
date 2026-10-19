@@ -16,29 +16,55 @@
 | **M11** | Additional PuTTY backends | **COMPLETE** (2026-10-15) |
 | **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
 | **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
-| M14 | Performance pass | IN PROGRESS |
+| **M14** | Performance pass | **COMPLETE** (2026-10-19) |
 | M15 | macOS productisation | NOT STARTED |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
 
-## M14 — Performance pass (in progress)
+## M14 — Performance pass (complete)
 
-**Started**
+**Delivered**
 
-- `TerminalRenderer` caches successful and missing primary-font glyph
-  lookups across redraws. The cache is bounded at 4,096 entries and is
-  cleared when full.
+- Retained the renderer's bounded (4,096-entry) glyph lookup cache and
+  resolved its font cache identity once per glyph run instead of once per
+  cell.
+- Raw output is delivered losslessly with API v13 acknowledgements. The
+  core throttles the backend at 256 KiB outstanding and resumes below
+  128 KiB; one in-flight read can extend the high-water mark. The main
+  session controller acknowledges output only after updating its
+  transcript.
+- A deterministic DNS measurement confirmed that a synchronous
+  `getaddrinfo` stall blocks another session on the shared core thread.
+  Keep the existing contract pending evidence of problematic real-world
+  resolver latency; see D-046.
 
-**Still required**
+**Measurements** (arm64 Mac, Debug Swift tests)
 
-- Measure rendering and core-to-main-thread costs under representative
-  output before claiming a performance improvement.
-- Bound raw-output event buffering without dropping session data. This
-  needs a consumption acknowledgement and backpressure path into the core;
-  switching the event stream to a lossy bounded policy would silently
-  discard output.
-- Measure the shared-core-thread impact of blocking DNS and decide whether
-  resolution should move to a helper thread or process.
+| Scenario | Result |
+|---|---:|
+| Warm full redraw, 80×24, 100 frames | 0.167 s total (1.67 ms/frame) |
+| 128 KiB received output through the core-to-main event path | 13.6 ms |
+| Controlled 262.5 ms resolver hold; second-session probe | 262.7 ms from resolver entry |
+
+Rendering timings are absolute post-change measurements, not a before/after
+comparison. The DNS hold is synthetic and does not characterize public DNS
+latency.
+
+**Verification**
+
+- `scripts/test-all.sh --stage core`: arm64 and x86_64 core builds; 8 C
+  tests, `leaks --atExit`, ASan+UBSan and TSan on arm64 — PASS.
+- `SPB_PERF_BENCHMARK=1 scripts/test-all.sh --stage swift`: all 129 tests
+  in 28 suites — PASS. Includes intact 2 MiB transfer, output
+  backpressure/resume, unacknowledged-output release, local SSH shell and
+  performance measurements.
+- DNS harness:
+  `cmake --build build/core-arm64 --target spb_dns_blocking_measurement &&
+  build/core-arm64/spb_dns_blocking_measurement` — PASS; no probe progress
+  during the controlled hold.
+
+- `scripts/test-all.sh --stage app`: Debug app build and universal Release
+  app build — PASS (arm64 and x86_64).
 
 ## M13 — Security and reliability hardening
 

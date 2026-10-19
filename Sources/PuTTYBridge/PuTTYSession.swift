@@ -49,8 +49,9 @@ public enum PuTTYSessionEvent: Sendable, Equatable {
     case stateChanged(PuTTYSessionState, detail: String?)
     /// One line of PuTTY's Event Log, and when PuTTY logged it.
     case eventLog(String, time: Date)
-    /// A copy of the data received from the connection, before the
-    /// terminal interprets it.
+    /// A copy of data received from the connection, before the
+    /// terminal interprets it. A consumer must acknowledge each
+    /// consumed event with ``PuTTYSession/acknowledgeOutput(bytes:)``.
     case output(Data, isStderr: Bool)
     /// The remote end exited (`Int32.max` for an unclean exit). Arrives
     /// before `.stateChanged(.closed, …)`.
@@ -241,13 +242,19 @@ public struct PuTTYStyleRun: Sendable, Equatable {
 /// ``events``, which finishes once the session has been torn down after
 /// this object is deinitialised.
 ///
-/// Received output is buffered without limit until it is consumed; flow
-/// control towards the connection is part of the performance pass (M14).
+/// Raw output is delivered losslessly. Consumers must acknowledge output
+/// bytes after processing each event; until then, PuTTY's backend is
+/// backpressured when its outstanding-output limit is reached.
 public final class PuTTYSession: Sendable {
     /// Process-unique, never-reused session identifier.
     public let id: UInt64
 
-    /// Everything the session reports, in order.
+    /// Raw-output high-water limit before the core applies backpressure.
+    /// A backend read already in progress may extend it.
+    public static let outputBufferLimit = Int(SPB_SESSION_OUTPUT_BUFFER_LIMIT)
+
+    /// Everything the session reports, in order. Output bytes remain
+    /// bounded by core backpressure until acknowledged.
     public let events: AsyncStream<PuTTYSessionEvent>
 
     // The C handle may be used from any thread (PuTTYBridge.h).
@@ -376,6 +383,14 @@ public final class PuTTYSession: Sendable {
     public func send(_ data: Data) {
         guard !data.isEmpty else { return }
         data.withUnsafeBytes { spb_session_send(handle, $0.baseAddress, $0.count) }
+    }
+
+    /// Acknowledge raw output after consuming it. Call once for each
+    /// delivered output event, using its full byte count. The core resumes
+    /// the backend as the outstanding data drains.
+    public func acknowledgeOutput(bytes: Int) {
+        guard bytes > 0 else { return }
+        spb_session_ack_output(handle, bytes)
     }
 
     /// Sends the UTF-8 encoding of `text`.

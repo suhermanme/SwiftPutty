@@ -196,6 +196,15 @@ function(swiftputty_define_core)
     -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
   add_test(NAME spb_session_test COMMAND spb_session_test)
 
+  # Deterministic M14 measurement of resolver stalls against a second
+  # already-connected session; run explicitly, not in the test suite.
+  add_executable(spb_dns_blocking_measurement
+    ${B}/tests/spb_dns_blocking_measurement.c)
+  set_property(TARGET spb_dns_blocking_measurement PROPERTY LINK_LIBRARIES
+    swiftputty-core)
+  target_compile_options(spb_dns_blocking_measurement PRIVATE
+    -Wall -Wextra -Werror -Wno-unused-parameter -Wdeprecated-declarations)
+
   # The terminal: frames, keys, paste, mouse, scrollback (M03).
   add_executable(spb_terminal_test ${B}/tests/spb_terminal_test.c)
   set_property(TARGET spb_terminal_test PROPERTY LINK_LIBRARIES
