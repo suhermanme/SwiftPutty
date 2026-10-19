@@ -22,24 +22,32 @@ parity), **M07** (live Change Settings), **M08** (SSH tunnels, changed
 live), **M09** (SSH authentication and the SSH panels), **M10** (Event
 Log and session operations), **M11** (Telnet, Rlogin, SUPDUP and serial
 lines), **M12** (configuration parity: proxies, connection sharing, host
-keys and CAs, agent forwarding, fonts, system colours, Copy as RTF) and
-**M13** (security and reliability: proxy password in the keychain, local
-commands hardened, fuzzing, GSSAPI on macOS, upstream fixes) are complete. The app starts
-with PuTTY's configuration dialog (Session, Logging, Terminal with
-Keyboard / Bell / Features, Window with Appearance / Behaviour /
-Translation / Selection / Colours / Fonts, Connection with Data and Proxy, the SSH panels,
-Serial, Telnet, Rlogin and SUPDUP; saved sessions with PuTTY's Load /
-Save / Delete rules) and opens SSH, Telnet, Rlogin, SUPDUP, Raw and
-serial-line sessions in terminal windows driven by PuTTY's own protocol
-code and terminal emulator, with PuTTY's host key dialog, in-terminal login
-and session logging. Session > Change Settings… changes a running
-session without reconnecting, as PuTTY does, including adding, removing
-and editing SSH port forwardings (a failed edit keeps the old one). See
-`docs/IMPLEMENTATION_STATUS.md`.
+keys and CAs, agent forwarding, fonts, system colours, Copy as RTF),
+**M13** (security and reliability) and **M14** (performance) are complete.
+The app starts with PuTTY's configuration dialog (Session, Logging,
+Terminal with Keyboard / Bell / Features, Window with Appearance /
+Behaviour / Translation / Selection / Colours / Fonts, Connection with
+Data and Proxy, the SSH panels, Serial, Telnet, Rlogin and SUPDUP; saved
+sessions with PuTTY's Load / Save / Delete rules) and opens SSH, Telnet,
+Rlogin, SUPDUP, Raw and serial-line sessions in terminal windows driven by
+PuTTY's own protocol code and terminal emulator, with PuTTY's host key
+dialog, in-terminal login and session logging. Session > Change Settings…
+changes a running session without reconnecting, as PuTTY does, including
+adding, removing and editing SSH port forwardings (a failed edit keeps the
+old one). See `docs/IMPLEMENTATION_STATUS.md`.
 
-M14 (performance) is in progress; its first change caches terminal glyph
-lookups. Profiling, output-flow control and the shared-thread DNS decision
-remain open.
+M14 retained a bounded terminal glyph cache and added lossless output
+delivery with acknowledgement-based backpressure. A controlled DNS
+measurement confirmed that synchronous resolver stalls block all sessions
+on the shared core thread; the existing contract remains pending evidence
+of problematic real-world resolver latency. See `docs/M14_DNS_MEASUREMENT.md`.
+
+M15 adds an ad-hoc-signed universal macOS app ZIP for GitHub Releases.
+Tag a release as `vMAJOR.MINOR.PATCH` to build and publish the app and its
+SHA-256 checksum from the `macos-26` GitHub Actions runner. The archive
+contains both Apple Silicon (arm64, including M-series Macs) and Intel
+(x86_64) slices. Ad-hoc signatures are not notarized; macOS may require the
+user to explicitly allow the downloaded app before opening it.
 
 ## Building
 
@@ -52,6 +60,17 @@ scripts/build-app.sh           # core + universal Release app → build/DerivedD
 scripts/build-app.sh Debug
 scripts/test-all.sh [--clean]  # every automated check
 ```
+
+To build the same release ZIP locally (without publishing it):
+
+```sh
+scripts/package-release.sh 0.1.0
+```
+
+The resulting `build/releases/SwiftPutty-v0.1.0-macos-universal.zip`
+contains an ad-hoc-signed app with arm64 and x86_64 slices. A `v0.1.0` tag
+triggers the GitHub Release workflow; use a new `vMAJOR.MINOR.PATCH` tag for
+each release.
 
 CI runs `scripts/test-all.sh --clean` on Apple Silicon and Intel runners
 for every push to `main` and every pull request (`.github/workflows/ci.yml`).

@@ -17,9 +17,37 @@
 | **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
 | **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
 | **M14** | Performance pass | **COMPLETE** (2026-10-19) |
-| M15 | macOS productisation | NOT STARTED |
+| **M15** | macOS productisation | **IN PROGRESS** |
 | M16 | Upstream update procedure | NOT STARTED |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M15 — macOS productisation (in progress)
+
+**Release target:** GitHub Releases, distributed as an ad-hoc-signed
+universal `.app` ZIP. No Developer ID certificate, notarization, or App
+Sandbox. The app and embedded core include both arm64 (Apple Silicon/M
+series) and x86_64 (Intel) slices. Users may need to explicitly allow the
+downloaded app in macOS security settings because ad-hoc signatures are
+not notarized.
+
+**Delivered**
+
+- `scripts/package-release.sh <version>` builds the core and Release app,
+  injects the version, verifies both executable architectures and the
+  ad-hoc code signature, then creates a ZIP and SHA-256 checksum.
+- `.github/workflows/release.yml` runs on `vMAJOR.MINOR.PATCH` tags and
+  publishes the ZIP and checksum as a GitHub Release.
+- The app remains unsandboxed to retain local command, serial-device,
+  arbitrary key-file, agent-socket and forwarding-listener capabilities
+  (R-6; D-047).
+
+**Verification**
+
+- `scripts/package-release.sh 0.1.0`: universal Release build, arm64 and
+  x86_64 verification, signature verification, ZIP and checksum creation —
+  PASS.
+- GitHub tag-triggered publication is configured but cannot be exercised
+  from this local run.
 
 ## M14 — Performance pass (complete)
 

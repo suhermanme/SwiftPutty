@@ -242,13 +242,13 @@ without user paths embedded in member names.
 
 ## D-016 — Platform baseline and identity
 
-**Status:** Accepted (M01; revisit in M15)
+**Status:** Accepted (M01; productisation decision updated by D-047 in M15)
 **Decision:** The minimum deployment target is macOS 14 (needed for the
 Observation framework; matches the Swift 6 toolchain baseline). Swift 6
 language mode applies everywhere, and warnings are errors in the app
-target. The bundle identifier `org.swiftputty.SwiftPutty` is a placeholder
-to replace before any distribution. Hardened runtime is on and signing is
-ad hoc. The App Sandbox is off pending the M15 evaluation. The default
+target. The current bundle identifier is `org.swiftputty.SwiftPutty`; M15
+retains it for GitHub distribution. Hardened runtime is on and the Release
+app is ad hoc signed. The App Sandbox remains off (D-047). The default
 terminal font is Menlo-Regular 12 (Windows PuTTY: Courier New 10).
 
 ## D-017 — Session release is asynchronous and ends with a `released` callback
@@ -981,3 +981,19 @@ latency warrants the contract change.
 **Consequences:** DNS stalls remain process-wide. The 262.5 ms delay is a
 controlled test interval, not a measurement of actual DNS latency; real
 resolver behavior remains environment-dependent.
+
+## D-047 — Ship universal ad-hoc-signed builds through GitHub Releases
+
+**Status:** Accepted (M15)
+**Context:** Distribution is via GitHub Releases. Developer ID signing and
+notarization are not part of this release model. The app supports workflows
+that require broad local access: local commands, serial devices, arbitrary
+key files, `SSH_AUTH_SOCK`, and forwarding listeners.
+**Decision:** Keep the App Sandbox disabled and publish a universal
+arm64/x86_64 app bundle signed ad hoc. A tag-triggered GitHub Actions
+workflow builds the app, verifies architecture and signature, and uploads a
+ZIP plus SHA-256 checksum. No notarization is attempted.
+**Consequences:** This avoids limiting existing PuTTY features, but macOS
+may block an app downloaded from the Internet until the user explicitly
+allows it. A Developer ID identity or notarization is not required by the
+release workflow.
