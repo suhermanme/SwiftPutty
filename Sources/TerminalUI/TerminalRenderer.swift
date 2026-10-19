@@ -13,12 +13,22 @@ import PuTTYBridge
 public struct TerminalRenderer {
     public var font: TerminalFont
 
+    private struct GlyphKey: Hashable {
+        var scalar: UInt32
+        var fontName: String
+        var pointSize: CGFloat
+    }
+
+    /// Terminal contents commonly survive many redraws. Keep Core Text's
+    /// scalar-to-glyph lookup out of that repeated paint path.
+    private var glyphCache: [GlyphKey: CGGlyph] = [:]
+
     public init(font: TerminalFont) {
         self.font = font
     }
 
     /// Draws `rows` of `screen`, origin at the top-left of row 0.
-    public func draw(_ screen: TerminalScreen, rows: Range<Int>, in context: CGContext) {
+    public mutating func draw(_ screen: TerminalScreen, rows: Range<Int>, in context: CGContext) {
         let rows = rows.clamped(to: 0..<screen.rows)
         for row in rows {
             context.saveGState()
@@ -51,7 +61,7 @@ public struct TerminalRenderer {
         }
     }
 
-    private func drawRow(_ screen: TerminalScreen, row: Int, columns: Int, in context: CGContext) {
+    private mutating func drawRow(_ screen: TerminalScreen, row: Int, columns: Int, in context: CGContext) {
         let cells = (0..<columns).map { screen.cell(column: $0, row: row) }
         let w = font.cellWidth, h = font.cellHeight
 
@@ -90,7 +100,7 @@ public struct TerminalRenderer {
                 if c.flags.contains(.wideContinuation) { runColumn += 1; continue }
                 guard c.foreground == cell.foreground, c.flags.contains(.bold) == bold,
                       c.flags.contains(.wide) == wide,
-                      c.scalars.count == 1, let glyph = Self.glyph(for: c.scalars[0], in: ctFont)
+                      c.scalars.count == 1, let glyph = glyph(for: c.scalars[0], in: ctFont)
                 else { break }
                 glyphs.append(glyph)
                 positions.append(CGPoint(x: CGFloat(runColumn) * w, y: 0))
@@ -207,11 +217,17 @@ public struct TerminalRenderer {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private static func glyph(for scalar: Unicode.Scalar, in font: CTFont) -> CGGlyph? {
+    private mutating func glyph(for scalar: Unicode.Scalar, in font: CTFont) -> CGGlyph? {
+        let key = GlyphKey(scalar: scalar.value,
+                           fontName: CTFontCopyPostScriptName(font) as String,
+                           pointSize: CTFontGetSize(font))
+        if let cached = glyphCache[key] { return cached }
         var units = Array(String(scalar).utf16)
         var glyphs = [CGGlyph](repeating: 0, count: units.count)
         guard units.count == 1, CTFontGetGlyphsForCharacters(font, &units, &glyphs, 1),
               glyphs[0] != 0 else { return nil }
+        if glyphCache.count >= 4096 { glyphCache.removeAll(keepingCapacity: true) }
+        glyphCache[key] = glyphs[0]
         return glyphs[0]
     }
 
