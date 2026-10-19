@@ -1,6 +1,14 @@
-# SwiftPutty
+<p align="center">
+  <img src="docs/screenshots/logo.png" width="128" alt="SwiftPutty logo">
+</p>
 
-[![CI](https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml/badge.svg)](https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml)
+<h1 align="center">SwiftPutty</h1>
+
+<p align="center">
+  <a href="https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml">
+    <img src="https://github.com/suhermanme/SwiftPutty/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+</p>
 
 A native macOS (SwiftUI + AppKit) frontend for the **PuTTY 0.85** portable
 core. The goal is Windows `putty.exe` behaviour — SSH, terminal semantics,
@@ -11,6 +19,16 @@ reconnecting** — presented as a native Mac app.
 SwiftPutty is an independent project, not an official PuTTY product. PuTTY
 is © Simon Tatham and contributors, MIT licensed. See
 `THIRD_PARTY_NOTICES.md`.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/config-dialog.png" width="420" alt="SwiftPutty's configuration dialog, with PuTTY's familiar category sidebar (Session, Terminal, Window, Connection…) in a native dark macOS window">
+  &nbsp;
+  <img src="docs/screenshots/security-alert.png" width="420" alt="SwiftPutty's host key security alert, verifying an SSH server's ed25519 fingerprint before connecting">
+</p>
+
+<p align="center"><em>PuTTY's configuration dialog and host-key verification, rebuilt as a native Mac app.</em></p>
 
 ## Status
 
