@@ -1022,3 +1022,34 @@ host process is not exposed to the same race through its own test double.
 **Consequences:** A dropped connection now reaches PuTTY's own code as
 `EPIPE` from `write()`/`send()`, as upstream already assumes, instead of
 being able to take down the whole app or test process.
+
+## D-049 — Skip the trust sigil's icon where the bundle declares none
+
+**Status:** Accepted (M15)
+**Context:** `TerminalRenderer.drawTrustSigil` draws
+`NSImage(named: .applicationIconName)`. The Intel CI job hung inside this
+call, not in any GSSAPI or SSH code: `hostKeyThenKeyboardInteractiveLoginThenShell`'s
+own 3-minute time limit fired, then the whole "Swift tests" step sat
+silent for the next 11 minutes until GitHub's own step timeout killed it.
+A live `lldb` backtrace (captured by the new watchdog in `ci.yml`, see
+below) showed the main thread blocked inside AppKit's icon-generation
+fallback — `-[ISConcreteIcon generateImageWithDescriptor:]` — on a
+synchronous XPC call to IconServices that never returned on that runner.
+The `SwiftPuttyKitPackageTests.xctest` bundle has no `CFBundleIconFile` /
+`CFBundleIconName` (unlike the real app, which declares one via
+`ASSETCATALOG_COMPILER_APPICON_NAME`), so `NSImage(named:)` falls through
+to that dynamic, XPC-backed fallback instead of a fast local asset-catalog
+read. No test asserts the sigil's actual pixels (screen-text extraction
+reads trust-sigil cells as spaces), so drawing nothing there costs
+nothing.
+**Decision:** Resolve the icon once per process, and only when the
+current bundle actually declares `CFBundleIconFile` or `CFBundleIconName`;
+otherwise skip the sigil. The real app always declares one, so its
+behaviour is unchanged. Separately, the CI "Swift tests" step now samples
+the test process with `lldb` every minute into the log "Report failures"
+already tails, so a stuck run leaves a backtrace instead of silence —
+this is what found the cause above.
+**Consequences:** A bundle with no icon resource (so far, only the test
+bundle) never reaches AppKit's slow dynamic-icon path. If the shipped app
+ever somehow lost its icon declaration, the sigil would silently stop
+drawing rather than risk the same hang.

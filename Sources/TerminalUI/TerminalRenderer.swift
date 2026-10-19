@@ -212,17 +212,33 @@ public struct TerminalRenderer {
         context.setLineDash(phase: 0, lengths: [])
     }
 
+    /// Resolved once per process: a bundle with no declared icon (a test
+    /// bundle, which has no `CFBundleIconFile`/`CFBundleIconName`) makes
+    /// `NSImage(named: .applicationIconName)` fall through to AppKit's
+    /// dynamic icon generation, which goes out to IconServices over XPC
+    /// and, on at least one class of CI runner, never returns. The real
+    /// app bundle always declares one (`ASSETCATALOG_COMPILER_APPICON_NAME`),
+    /// so this only skips the sigil where there was never a real icon to
+    /// draw anyway.
+    private static let applicationIcon: NSImage? = {
+        guard Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") != nil
+            || Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") != nil else {
+            return nil
+        }
+        return NSImage(named: NSImage.applicationIconName)
+    }()
+
     /// PuTTY's trust sigil marks lines PuTTY itself wrote (as opposed to
     /// the server) during authentication.
     private func drawTrustSigil(column: Int, in context: CGContext) {
+        guard let image = Self.applicationIcon else { return }
         let rect = CGRect(x: CGFloat(column) * font.cellWidth, y: 0,
                           width: 2 * font.cellWidth, height: font.cellHeight).insetBy(dx: 1, dy: 1)
         let side = min(rect.width, rect.height)
         let square = CGRect(x: rect.midX - side / 2, y: rect.midY - side / 2, width: side, height: side)
-        let image = NSImage(named: NSImage.applicationIconName)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
-        image?.draw(in: square)
+        image.draw(in: square)
         NSGraphicsContext.restoreGraphicsState()
     }
 
