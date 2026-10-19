@@ -1072,3 +1072,31 @@ check pass).
 **Consequences:** The packaging script's own architecture verification
 now does what it was meant to; re-tagging `v0.1.0` should let
 `release.yml` reach the publish step.
+
+## D-051 — Validate the upstream update procedure lightly, not by simulation
+
+**Status:** Accepted (M16)
+**Context:** M16 is "validate the upstream update procedure"
+(`docs/UPSTREAM_PUTTY.md`), but PuTTY has released nothing past 0.85,
+the version already pinned here, so there is no real new content to
+update to. Simulating one (re-extracting an old release and 3-way
+merging forward) was considered and rejected as the primary approach:
+it exercises the mechanics but not the actual judgment calls a real
+update requires (reading a real changelog, deciding whether a real
+upstream change invalidates a patch's rationale), so it would have
+produced a false sense of having "done" M16 without much real signal.
+**Decision:** Treat the steps that already run routinely as validated
+by that routine use (patch re-application, on every build; rebuild and
+full test suite, on every CI run and locally), re-confirm the
+tooling that genuinely needed a direct check (`prepare-putty-src.sh`:
+all 24 patches re-applied cleanly), and explicitly document the one
+step that cannot be exercised without a real new release (wholesale-
+replacing `Vendor/putty/`) as an honest, open gap rather than papering
+over it. A re-run of `scripts/verify-upstream.sh` this session also
+surfaced that `chiark.greenend.org.uk` (PuTTY's key host) is unreachable
+from this sandbox, unrelated to the procedure itself; recorded in
+`docs/UPSTREAM_PUTTY.md` so it isn't mistaken for a real finding.
+**Consequences:** M16 closes without a real version bump. The
+documented procedure should still get its first genuine exercise — and
+likely a correction or two — the first time PuTTY actually ships a new
+release.

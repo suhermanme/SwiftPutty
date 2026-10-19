@@ -18,8 +18,35 @@
 | **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
 | **M14** | Performance pass | **COMPLETE** (2026-10-19) |
 | **M15** | macOS productisation | **IN PROGRESS** |
-| M16 | Upstream update procedure | NOT STARTED |
+| **M16** | Upstream update procedure | **COMPLETE** (2026-10-19) |
 | M17 | Release candidate audit | NOT STARTED |
+
+## M16 — Upstream update procedure (complete)
+
+**Delivered**
+
+- The documented update procedure in `docs/UPSTREAM_PUTTY.md` is now
+  marked validated, with each step's actual coverage recorded against
+  it: patch re-application and the full build/test cycle already run
+  routinely (every build, every CI run); the fetch/verify step was last
+  run for real in M13; the wholesale-replace step has no real content
+  to exercise it against, since PuTTY has shipped nothing past the
+  pinned 0.85 (D-051).
+
+**Verification**
+
+- `scripts/prepare-putty-src.sh`: all 24 patches in `patches/` applied
+  cleanly in order against a fresh copy of `Vendor/putty/` — PASS.
+- `scripts/verify-upstream.sh`: re-run attempted this session; blocked
+  by `chiark.greenend.org.uk` (PuTTY's key host) being unreachable from
+  this sandbox, unrelated to the script or the pinned archive. The last
+  completed run (M13, 2026-10-15) remains the most recent real
+  verification; see `docs/UPSTREAM_PUTTY.md`.
+
+**Limitations / not done**
+
+- No real upstream update has been rehearsed. The first genuine PuTTY
+  release past 0.85 is this procedure's first real test.
 
 ## M15 — macOS productisation (in progress)
 

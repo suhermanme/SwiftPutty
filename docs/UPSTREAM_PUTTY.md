@@ -129,7 +129,36 @@ was made against, and its upstream status. See also `patches/README.md`.
   `ssh2_rportfwd_globreq_response`, and in `portfwdmgr_config` after the
   duplicate branch) and are fixed by patches 0007 and 0008.
 
-## Update procedure (to be validated in M16)
+## Update procedure (validated, M16)
+
+PuTTY has shipped no release past 0.85 (the pinned version) as of M16,
+so this procedure could not be rehearsed against real new content.
+What was checked instead, 2026-10-19:
+
+- Step 2 (fetch + GPG-verify the release tarball): last performed for
+  real in M13 (2026-10-15), recorded above — good signature, correct
+  key chain, `Vendor/putty/` byte-identical to the verified archive. A
+  re-run this session (`scripts/verify-upstream.sh`) could not complete
+  because `chiark.greenend.org.uk`, which hosts PuTTY's signing keys,
+  is unreachable (connection times out) from this sandbox, even though
+  `the.earth.li`, which hosts the release tarball itself, is reachable.
+  This is a network limitation of this session's environment, not a
+  finding about the pinned archive or the script; re-run it from an
+  unrestricted network before any real version bump.
+- Step 4 (re-apply `patches/`): `scripts/prepare-putty-src.sh` runs this
+  on every build already (via `scripts/build-core.sh`), and all 24
+  patches applied cleanly in order when re-checked directly this
+  session. This exercises `patch -p1` against the known-unchanged base,
+  not the `git apply --3way` conflict-resolution path below, which only
+  matters once upstream source has actually moved.
+- Steps 5-6 (rebuild, full test suite): run continuously by this
+  project's CI (`.github/workflows/ci.yml`) and locally throughout this
+  session.
+- **Not exercised, and can't be until a real new release exists:** step
+  3, wholesale-replacing `Vendor/putty/` and re-checking the CMake
+  source lists against a *different* upstream tree, and step 4's actual
+  3-way merge/conflict path (nothing has conflicted because nothing
+  upstream has changed).
 
 1. `git fetch` upstream. Read the release's change log, security advisories
    (`https://www.chiark.greenend.org.uk/~sgtatham/putty/changes.html`,
