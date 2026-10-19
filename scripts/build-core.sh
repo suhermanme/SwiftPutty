@@ -94,7 +94,7 @@ if [[ $RUN_TESTS == 1 ]]; then
             section "Re-running spb_ssh_test under lldb for crash diagnostics"
             lldb_log="$BUILD/spb_ssh_test-lldb.log"
             (cd "$BUILD/core-$HOST_ARCH" \
-                && lldb --batch -o run -o "thread backtrace all" -- ./spb_ssh_test) \
+                && lldb --batch -o run -k "thread backtrace all" -- ./spb_ssh_test) \
                 > "$lldb_log" 2>&1 || true
             backtrace="$(awk '/thread #[0-9]+|frame #[0-9]+:|stop reason =/ {
                 gsub(/%/, "%25"); gsub(/\r/, "%0D");
