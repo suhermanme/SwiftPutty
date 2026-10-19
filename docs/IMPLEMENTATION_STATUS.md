@@ -17,7 +17,7 @@
 | **M12** | Configuration parity pass | **COMPLETE** (2026-10-15) |
 | **M13** | Security and reliability hardening | **COMPLETE** (2026-10-15) |
 | **M14** | Performance pass | **COMPLETE** (2026-10-19) |
-| **M15** | macOS productisation | **IN PROGRESS** |
+| **M15** | macOS productisation | **COMPLETE** (2026-10-19) |
 | **M16** | Upstream update procedure | **COMPLETE** (2026-10-19) |
 | **M17** | Release candidate audit | **COMPLETE** (2026-10-19) |
 
@@ -84,7 +84,7 @@
 - No real upstream update has been rehearsed. The first genuine PuTTY
   release past 0.85 is this procedure's first real test.
 
-## M15 — macOS productisation (in progress)
+## M15 — macOS productisation (complete)
 
 **Release target:** GitHub Releases, distributed as an ad-hoc-signed
 universal `.app` ZIP. No Developer ID certificate, notarization, or App
@@ -127,9 +127,19 @@ not notarized.
   [39226656168](https://github.com/suhermanme/SwiftPutty/actions/runs/39226656168)):
   **FAILED** at the universal app's architecture verification step, root-
   caused to the D-050 `lipo` argument-order bug (not a build problem); the
-  publish step was skipped and no GitHub Release was created. Re-tagging
-  `v0.1.0` after this fix is the natural next step but has not been done
-  yet.
+  publish step was skipped and no GitHub Release was created.
+- Tag `v0.1.0` had already been pushed before the D-050 fix, and moving
+  it was blocked as a destructive git operation in this environment;
+  tagged `v0.1.1` instead (first real release). GitHub release workflow
+  for tag `v0.1.1` (run
+  [39283091932](https://github.com/suhermanme/SwiftPutty/actions/runs/39283091932)):
+  **PASSED**, publishing
+  [SwiftPutty 0.1.1](https://github.com/suhermanme/SwiftPutty/releases/tag/v0.1.1)
+  with the universal app ZIP and its SHA-256 checksum — the project's
+  first published GitHub Release.
+
+M15 is now complete: the release pipeline works end to end, from a
+tagged push to a published, downloadable universal build.
 
 ## M14 — Performance pass (complete)
 

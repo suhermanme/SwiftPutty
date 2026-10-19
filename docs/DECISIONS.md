@@ -1156,3 +1156,21 @@ reported upstream, both intentionally (feature addition; user's call to
 hold the security report). Any reply from PuTTY's maintainers about the
 reported batch is new input to react to, not something this session can
 anticipate.
+
+## D-054 — Tag `v0.1.1`, not a moved `v0.1.0`, for the first real release
+
+**Status:** Accepted (M15)
+**Context:** Tag `v0.1.0` already existed, pointing at the commit before
+the D-050 `lipo` fix, and its one release run had failed before
+publishing anything. Moving it (delete + re-create + force-push) to the
+fixed commit was blocked by this environment's own safety classifier as
+a destructive git operation.
+**Decision:** Tag `v0.1.1` at the fixed commit instead — an ordinary,
+non-destructive, additive push. `v0.1.0` remains in the repository as a
+tag with no corresponding release, which is accurate history (it really
+did fail), not something worth cleaning up by force.
+**Consequences:** The project's first published GitHub Release is
+`v0.1.1`, not `v0.1.0` (run
+[39283091932](https://github.com/suhermanme/SwiftPutty/actions/runs/39283091932),
+[release](https://github.com/suhermanme/SwiftPutty/releases/tag/v0.1.1)).
+Future version bumps continue from 0.1.1.
