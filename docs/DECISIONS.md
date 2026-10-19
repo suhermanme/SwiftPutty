@@ -1053,3 +1053,22 @@ this is what found the cause above.
 bundle) never reaches AppKit's slow dynamic-icon path. If the shipped app
 ever somehow lost its icon declaration, the sigil would silently stop
 drawing rather than risk the same hang.
+
+## D-050 — Fix `lipo -verify_arch` argument order in the release packager
+
+**Status:** Accepted (M15)
+**Context:** `scripts/package-release.sh` called
+`lipo -verify_arch arm64 "$APP/.../SwiftPutty"`, but `lipo`'s input file
+is a positional argument that must precede the command
+(`lipo <input_file> -verify_arch <arch_type> ...`). With the flag first,
+`lipo` read the file path as an extra `-verify_arch` arch-type argument
+and found no input file at all, failing with "unknown architecture
+specification flag" — the error that sank the tag-`v0.1.0` release run
+(39226656168) after an otherwise-successful universal build.
+**Decision:** Put the binary path first: `lipo "$APP/..." -verify_arch
+arm64` / `-verify_arch x86_64`. Verified directly against the already-built
+local universal Release app (both arch checks and the ad-hoc signature
+check pass).
+**Consequences:** The packaging script's own architecture verification
+now does what it was meant to; re-tagging `v0.1.0` should let
+`release.yml` reach the publish step.

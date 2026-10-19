@@ -40,19 +40,33 @@ not notarized.
 - The app remains unsandboxed to retain local command, serial-device,
   arbitrary key-file, agent-socket and forwarding-listener capabilities
   (R-6; D-047).
+- Fixed three issues that had been failing CI, in the order they were
+  masking each other: a missing `SIGPIPE` guard in `spb_core_init`
+  (D-048), a backing-scale-sensitive pixel measurement in
+  `shadowBoldWidensBoldGlyphs`, and an IconServices/XPC hang in
+  `TerminalRenderer.drawTrustSigil` specific to bundles with no declared
+  icon (D-049) — the last found via a new `lldb` thread-sampling
+  watchdog added to the "Swift tests" CI step. Also fixed a `lipo
+  -verify_arch` argument-order bug in `scripts/package-release.sh`
+  (D-050) that was the actual cause of the `v0.1.0` release failure
+  below.
 
 **Verification**
 
 - `scripts/package-release.sh 0.1.0`: universal Release build, arm64 and
   x86_64 verification, signature verification, ZIP and checksum creation —
-  PASS.
+  PASS (re-verified after the D-050 fix against the local universal
+  Release build).
+- CI (run [39258737318](https://github.com/suhermanme/SwiftPutty/actions/runs/39258737318)):
+  both `test-all (arm64)` (26m9s) and `test-all (x86_64)` (42m58s) —
+  PASS, after D-048/D-049.
 - GitHub release workflow for tag `v0.1.0` (run
   [39226656168](https://github.com/suhermanme/SwiftPutty/actions/runs/39226656168)):
-  **FAILED** at the universal app build/package step; the publish step was
-  skipped, and no GitHub Release was created. The public run summary exposes
-  no build diagnostic; reading the logs requires a `GITHUB_TOKEN`. Local
-  Xcode 26.6 is not installed here, so the hosted failure could not be
-  reproduced locally.
+  **FAILED** at the universal app's architecture verification step, root-
+  caused to the D-050 `lipo` argument-order bug (not a build problem); the
+  publish step was skipped and no GitHub Release was created. Re-tagging
+  `v0.1.0` after this fix is the natural next step but has not been done
+  yet.
 
 ## M14 — Performance pass (complete)
 

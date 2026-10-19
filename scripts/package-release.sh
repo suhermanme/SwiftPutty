@@ -34,8 +34,12 @@ xcodebuild \
     CODE_SIGNING_ALLOWED=YES \
     build
 
-lipo -verify_arch arm64 "$APP/Contents/MacOS/SwiftPutty"
-lipo -verify_arch x86_64 "$APP/Contents/MacOS/SwiftPutty"
+# lipo's input file is positional and must come before the command
+# (-verify_arch), not after: `lipo -verify_arch arm64 <file>` makes lipo
+# treat the file path as another arch_type argument to -verify_arch and
+# error with no input file given.
+lipo "$APP/Contents/MacOS/SwiftPutty" -verify_arch arm64
+lipo "$APP/Contents/MacOS/SwiftPutty" -verify_arch x86_64
 codesign --verify --deep --strict --verbose=2 "$APP"
 SIGNATURE_INFO="$(codesign -dv --verbose=4 "$APP" 2>&1 || true)"
 if [[ "$SIGNATURE_INFO" != *"Signature=adhoc"* ]]; then
