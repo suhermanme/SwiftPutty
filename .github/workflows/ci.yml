@@ -59,11 +59,33 @@ jobs:
       # `script` gives the tests a pseudo-terminal, so their progress
       # lines are written as they happen (with a pipe they are buffered,
       # and lost if the step times out).
+      #
+      # A hang here previously left nothing but a bare step timeout: no
+      # test output after the stuck test's own time limit fired, and no
+      # process state. Sample the test process's threads every minute
+      # while it runs, into the same log the "Report failures" step
+      # already tails, so a stuck run's last sample is the end of the
+      # log instead of silence.
       - name: Swift tests
         timeout-minutes: 15
         run: |
           set -o pipefail
-          script -q /dev/null scripts/test-all.sh --stage swift < /dev/null 2>&1 | tee -a test-all.log
+          ( script -q /dev/null scripts/test-all.sh --stage swift < /dev/null 2>&1 \
+              | tee -a test-all.log ) &
+          test_pid=$!
+          ( while kill -0 "$test_pid" 2>/dev/null; do
+              sleep 60
+              pid=$(pgrep -f 'SwiftPuttyKitPackageTests.xctest/Contents/MacOS' | head -1 || true)
+              if [[ -n "$pid" ]]; then
+                { echo "== lldb backtrace of pid $pid, all threads =="
+                  lldb --batch -p "$pid" -o "thread backtrace all" -o "detach" -o "quit" 2>&1
+                } >> test-all.log
+              fi
+            done ) &
+          watchdog_pid=$!
+          wait "$test_pid"; status=$?
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
 
       - name: Swift tests (AddressSanitizer)
         timeout-minutes: 20

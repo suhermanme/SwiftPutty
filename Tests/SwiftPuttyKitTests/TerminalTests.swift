@@ -273,9 +273,14 @@ extension KitTests {
         }
 
         /// GTK PuTTY's shadow bold: a bold glyph is the ordinary glyph
-        /// drawn again ShadowBoldOffset points to the right.
+        /// drawn again ShadowBoldOffset points to the right. Measured as
+        /// ink pixels over the glyph's whole cell, not one scanline: a
+        /// single row's ink width is sensitive to exactly where it falls
+        /// relative to the glyph's strokes, which shifts with the
+        /// backing scale factor (e.g. a headless runner with no attached
+        /// display rendering at 1x instead of a Retina 2x).
         @Test func shadowBoldWidensBoldGlyphs() async throws {
-            func inkWidth(shadow: Bool) async throws -> Int {
+            func inkArea(shadow: Bool) async throws -> Int {
                 let term = try ScriptedTerminal(settings: [
                     "BoldAsColour": "0", "ShadowBold": shadow ? "1" : "0", "ShadowBoldOffset": "3"])
                 defer { term.close() }
@@ -287,16 +292,17 @@ extension KitTests {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 let scale = CGFloat(rep.pixelsWide) / view.bounds.width
                 let font = view.renderer.font, b = view.border
-                let y = Int((b + font.cellHeight / 2) * scale)
-                var columns = 0
-                for x in Int(b * scale)..<Int((b + font.cellWidth * 2) * scale) {
-                    let c = rep.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
-                    if c.redComponent + c.greenComponent + c.blueComponent > 1.2 { columns += 1 }
+                var inkPixels = 0
+                for y in Int(b * scale)..<Int((b + font.cellHeight) * scale) {
+                    for x in Int(b * scale)..<Int((b + font.cellWidth * 2) * scale) {
+                        let c = rep.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+                        if c.redComponent + c.greenComponent + c.blueComponent > 1.2 { inkPixels += 1 }
+                    }
                 }
-                return columns
+                return inkPixels
             }
-            let plain = try await inkWidth(shadow: false)
-            let shadowed = try await inkWidth(shadow: true)
+            let plain = try await inkArea(shadow: false)
+            let shadowed = try await inkArea(shadow: true)
             #expect(plain > 0)
             #expect(shadowed > plain)
         }
